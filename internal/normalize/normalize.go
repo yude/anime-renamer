@@ -146,11 +146,6 @@ func toHalfWidth(r rune) rune {
 	return r
 }
 
-// IsASCIIAlphaNum checks if a rune is an ASCII alphanumeric character.
-func IsASCIIAlphaNum(r rune) bool {
-	return (r >= '0' && r <= '9') || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z')
-}
-
 // IsSpaceOrFullWidthSpace checks if a rune is a space or full-width space.
 func IsSpaceOrFullWidthSpace(r rune) bool {
 	return r == ' ' || r == '\u3000' || r == '　' || unicode.IsSpace(r)
