@@ -35,10 +35,15 @@ const (
 	graphqlEndpoint = "https://api.annict.com/graphql"
 )
 
+// retrySleep is overridable in tests so retry-exhaustion paths don't have to
+// wait out the real backoff delay.
+var retrySleep = time.Sleep
+
 // Client is an Annict API client.
 type Client struct {
 	accessToken string
 	baseURL     string
+	graphqlURL  string
 	httpClient  *http.Client
 }
 
@@ -47,17 +52,32 @@ func NewClient(accessToken string) *Client {
 	return &Client{
 		accessToken: accessToken,
 		baseURL:     defaultBaseURL,
+		graphqlURL:  graphqlEndpoint,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
 	}
 }
 
-// NewClientWithBaseURL creates a client with a custom base URL (for testing).
+// NewClientWithBaseURL creates a client with a custom REST base URL (for testing).
 func NewClientWithBaseURL(accessToken, baseURL string) *Client {
 	return &Client{
 		accessToken: accessToken,
 		baseURL:     baseURL,
+		graphqlURL:  graphqlEndpoint,
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+	}
+}
+
+// NewClientWithURLs creates a client with custom REST and GraphQL endpoints
+// (for testing both code paths against a local server).
+func NewClientWithURLs(accessToken, baseURL, graphqlURL string) *Client {
+	return &Client{
+		accessToken: accessToken,
+		baseURL:     baseURL,
+		graphqlURL:  graphqlURL,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -400,10 +420,10 @@ func (c *Client) postGraphQL(query graphqlQuery) ([]byte, error) {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
-			time.Sleep(time.Duration(attempt) * time.Second)
+			retrySleep(time.Duration(attempt) * time.Second)
 		}
 
-		req, err := http.NewRequest("POST", graphqlEndpoint, bytes.NewReader(body))
+		req, err := http.NewRequest("POST", c.graphqlURL, bytes.NewReader(body))
 		if err != nil {
 			lastErr = fmt.Errorf("create request: %w", err)
 			continue
@@ -443,7 +463,7 @@ func (c *Client) get(path string, params url.Values, result interface{}) error {
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
-			time.Sleep(time.Duration(attempt) * time.Second)
+			retrySleep(time.Duration(attempt) * time.Second)
 		}
 
 		req, err := http.NewRequest("GET", u, nil)
