@@ -394,40 +394,49 @@ func collectFiles(target string, recursive bool) ([]string, error) {
 	return files, err
 }
 
-// loadTokenFromDotenv looks for .env in the file's directory and parent directories.
-func loadTokenFromDotenv(path string) string {
-	dir := filepath.Dir(path)
+// loadTokenFromDotenv looks for .env in target's own directory (or target
+// itself, if it is a directory) and its parent directories.
+func loadTokenFromDotenv(target string) string {
+	dir := target
+	if info, err := os.Stat(target); err != nil || !info.IsDir() {
+		dir = filepath.Dir(target)
+	}
+
 	for {
-		dotenv := filepath.Join(dir, ".env")
-		f, err := os.Open(dotenv)
-		if err != nil {
-			if dir == "/" {
-				break
-			}
-			dir = filepath.Dir(dir)
-			continue
+		if token, ok := readTokenFromEnvFile(filepath.Join(dir, ".env")); ok {
+			return token
 		}
 
-		scanner := bufio.NewScanner(f)
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line == "" || strings.HasPrefix(line, "#") {
-				continue
-			}
-			key, value, ok := strings.Cut(line, "=")
-			if !ok || key != "ANNICT_ACCESS_TOKEN" {
-				continue
-			}
-			value = strings.Trim(value, "'\"")
-			f.Close()
-			return value
-		}
-		f.Close()
-
-		if dir == "/" {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Reached the filesystem root (e.g. "/" or "C:\"); filepath.Dir
+			// is a no-op there on every OS, so stop instead of looping forever.
 			break
 		}
-		dir = filepath.Dir(dir)
+		dir = parent
 	}
 	return ""
+}
+
+// readTokenFromEnvFile reads ANNICT_ACCESS_TOKEN from a dotenv-style file.
+func readTokenFromEnvFile(path string) (string, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", false
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok || key != "ANNICT_ACCESS_TOKEN" {
+			continue
+		}
+		return strings.Trim(value, "'\""), true
+	}
+	return "", false
 }
