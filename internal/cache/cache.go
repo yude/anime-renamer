@@ -17,28 +17,34 @@ const defaultTTL = 7 * 24 * time.Hour
 type Cache struct {
 	dir     string
 	ttl     time.Duration
+	enabled bool
 	mu      sync.RWMutex
-	works   map[string]*annict.Work
-	episodes map[int][]annict.Episode
 }
 
 // New creates a new Cache. dir is the cache directory.
 func New(dir string) *Cache {
 	return &Cache{
-		dir:      dir,
-		ttl:      defaultTTL,
-		works:    make(map[string]*annict.Work),
-		episodes: make(map[int][]annict.Episode),
+		dir:     dir,
+		ttl:     defaultTTL,
+		enabled: true,
 	}
 }
 
 // NewWithTTL creates a cache with a custom TTL.
 func NewWithTTL(dir string, ttl time.Duration) *Cache {
 	return &Cache{
-		dir:      dir,
-		ttl:      ttl,
-		works:    make(map[string]*annict.Work),
-		episodes: make(map[int][]annict.Episode),
+		dir:     dir,
+		ttl:     ttl,
+		enabled: true,
+	}
+}
+
+// NewDisabled creates a Cache that never reads or writes to disk. All Get
+// methods report a miss and all Set methods are no-ops. Used for --no-cache.
+func NewDisabled(dir string) *Cache {
+	return &Cache{
+		dir: dir,
+		ttl: defaultTTL,
 	}
 }
 
@@ -49,6 +55,10 @@ type cacheEntry[T any] struct {
 
 // GetWork retrieves a cached work by title.
 func (c *Cache) GetWork(title string) (*annict.Work, bool) {
+	if !c.enabled {
+		return nil, false
+	}
+
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -77,6 +87,10 @@ func (c *Cache) GetWork(title string) (*annict.Work, bool) {
 
 // SetWork caches a work by title.
 func (c *Cache) SetWork(title string, work *annict.Work) error {
+	if !c.enabled {
+		return nil
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -107,6 +121,10 @@ func (c *Cache) SetWork(title string, work *annict.Work) error {
 
 // GetEpisodes retrieves cached episodes for a work ID.
 func (c *Cache) GetEpisodes(workID int) ([]annict.Episode, bool) {
+	if !c.enabled {
+		return nil, false
+	}
+
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -130,6 +148,10 @@ func (c *Cache) GetEpisodes(workID int) ([]annict.Episode, bool) {
 
 // SetEpisodes caches episodes for a work ID.
 func (c *Cache) SetEpisodes(workID int, episodes []annict.Episode) error {
+	if !c.enabled {
+		return nil
+	}
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

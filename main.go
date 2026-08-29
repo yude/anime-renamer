@@ -57,10 +57,14 @@ func main() {
 	// Initialize components
 	annictClient := annict.NewClient(token)
 
-	cacheDir := filepath.Join(os.Getenv("HOME"), ".cache", "anime-renamer")
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		homeDir = os.Getenv("HOME")
+	}
+	cacheDir := filepath.Join(homeDir, ".cache", "anime-renamer")
 	var c *cache.Cache
 	if *noCache {
-		c = cache.New(cacheDir)
+		c = cache.NewDisabled(cacheDir)
 	} else {
 		c = cache.New(cacheDir)
 	}
