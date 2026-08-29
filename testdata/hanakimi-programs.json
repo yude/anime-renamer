@@ -1,0 +1,42 @@
+{
+  "programs": [
+    {
+      "id": 5001,
+      "started_at": "2026-08-13T00:30:00+09:00",
+      "is_rebroadcast": false,
+      "channel": {
+        "id": 19,
+        "name": "TOKYO MX"
+      },
+      "work": {
+        "id": 4168,
+        "title": "花ざかりの君たちへ 第2期"
+      },
+      "episode": {
+        "id": 1007,
+        "number": 7,
+        "number_text": "第7話",
+        "title": "ずっとそばにいたいから"
+      }
+    },
+    {
+      "id": 5002,
+      "started_at": "2026-08-13T01:00:00+09:00",
+      "is_rebroadcast": true,
+      "channel": {
+        "id": 19,
+        "name": "TOKYO MX"
+      },
+      "work": {
+        "id": 4168,
+        "title": "花ざかりの君たちへ 第2期"
+      },
+      "episode": {
+        "id": 1007,
+        "number": 7,
+        "number_text": "第7話",
+        "title": "ずっとそばにいたいから"
+      }
+    }
+  ]
+}

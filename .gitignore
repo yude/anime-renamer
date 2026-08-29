@@ -1,0 +1,19 @@
+# Binary
+anime-renamer
+
+# Go build cache
+*.test
+*.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Debug
+normalize_test_check.go

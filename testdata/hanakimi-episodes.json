@@ -1,0 +1,74 @@
+{
+  "episodes": [
+    {
+      "id": 1001,
+      "number": 1,
+      "number_text": "第1話",
+      "sort_number": 10,
+      "title": "さくらんぼキッス〜爆発だ!〜"
+    },
+    {
+      "id": 1002,
+      "number": 2,
+      "number_text": "第2話",
+      "sort_number": 20,
+      "title": "ハリケーン・リリ、ストロボ・フレーム"
+    },
+    {
+      "id": 1003,
+      "number": 3,
+      "number_text": "第3話",
+      "sort_number": 30,
+      "title": "きみにとどけ!"
+    },
+    {
+      "id": 1004,
+      "number": 4,
+      "number_text": "第4話",
+      "sort_number": 40,
+      "title": "恋のバトン"
+    },
+    {
+      "id": 1005,
+      "number": 5,
+      "number_text": "第5話",
+      "sort_number": 50,
+      "title": "ビーチで決戦!"
+    },
+    {
+      "id": 1006,
+      "number": 6,
+      "number_text": "第6話",
+      "sort_number": 60,
+      "title": "花嫁の值段"
+    },
+    {
+      "id": 1007,
+      "number": 7,
+      "number_text": "第7話",
+      "sort_number": 70,
+      "title": "ずっとそばにいたいから"
+    },
+    {
+      "id": 1008,
+      "number": 8,
+      "number_text": "第8話",
+      "sort_number": 80,
+      "title": "夏休みだよ! フルスロットル"
+    },
+    {
+      "id": 1009,
+      "number": 9,
+      "number_text": "第9話",
+      "sort_number": 90,
+      "title": "合宿でドキドキ"
+    },
+    {
+      "id": 1010,
+      "number": 10,
+      "number_text": "第10話",
+      "sort_number": 100,
+      "title": "文化祭で大はしゃぎ"
+    }
+  ]
+}
