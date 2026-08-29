@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/yude/anime-renamer/internal/annict"
+	"github.com/yude/anime-renamer/internal/matcher"
 )
 
 func writeEnvFile(t *testing.T, dir, token string) {
@@ -154,6 +155,48 @@ func TestEpisodesComplete(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := episodesComplete(tt.work, tt.episodes); got != tt.want {
 				t.Errorf("episodesComplete() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestResolveConfidenceThreshold(t *testing.T) {
+	tests := []struct {
+		name          string
+		explicitValue int
+		explicitlySet bool
+		dryRun        bool
+		want          int
+	}{
+		{
+			name: "normal run, no explicit flag, uses AutoRenameThreshold",
+			want: matcher.AutoRenameThreshold,
+		},
+		{
+			name:   "dry-run, no explicit flag, uses the more lenient DryRunThreshold",
+			dryRun: true,
+			want:   matcher.DryRunThreshold,
+		},
+		{
+			name:          "explicit --confidence always wins, even under --dry-run",
+			explicitValue: 55,
+			explicitlySet: true,
+			dryRun:        true,
+			want:          55,
+		},
+		{
+			name:          "explicit --confidence wins in a normal run too",
+			explicitValue: 99,
+			explicitlySet: true,
+			want:          99,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := resolveConfidenceThreshold(tt.explicitValue, tt.explicitlySet, tt.dryRun); got != tt.want {
+				t.Errorf("resolveConfidenceThreshold(%d, %v, %v) = %d, want %d",
+					tt.explicitValue, tt.explicitlySet, tt.dryRun, got, tt.want)
 			}
 		})
 	}
