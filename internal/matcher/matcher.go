@@ -80,12 +80,8 @@ func Match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 			if len(narrowed) == 1 {
 				work = narrowed[0]
 			} else if len(narrowed) > 0 {
-				// Still multiple, try exact title match within narrowed set
-				exactOnly := filterExactTitle(narrowed, meta.WorkTitle)
-				if len(exactOnly) == 1 {
-					work = exactOnly[0]
-				} else if meta.EpisodeNumber > 0 {
-					// Try narrowing by episode number range
+				// Still multiple, try narrowing by episode number range
+				if meta.EpisodeNumber > 0 {
 					epMatched := narrowByEpisodeNumber(narrowed, meta.EpisodeNumber, episodesByWork)
 					if epMatched != nil {
 						work = *epMatched.Work
@@ -336,18 +332,6 @@ func narrowByEpisodeNumber(works []annict.Work, episodeNum int, episodesByWork m
 	}
 
 	return nil
-}
-
-// filterExactTitle returns works with exact title match.
-func filterExactTitle(works []annict.Work, title string) []annict.Work {
-	normalized := normalize.NormalizeForSearch(title)
-	var result []annict.Work
-	for _, w := range works {
-		if normalize.NormalizeForSearch(w.Title) == normalized {
-			result = append(result, w)
-		}
-	}
-	return result
 }
 
 // workTitles returns a comma-separated list of work titles.

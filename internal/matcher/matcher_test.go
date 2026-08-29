@@ -191,6 +191,60 @@ func TestSeasonNarrowing(t *testing.T) {
 	}
 }
 
+func TestMatchSameSeasonSameTitleNarrowedByEpisode(t *testing.T) {
+	// Same title AND same season for both candidates (e.g. a duplicate
+	// Annict registration): narrowBySeason alone can't disambiguate, so
+	// Match() must fall through to episode-number narrowing.
+	works := []annict.Work{
+		{ID: 1, Title: "作品", SeasonName: "2026-summer"},
+		{ID: 2, Title: "作品", SeasonName: "2026-summer"},
+	}
+	meta := &parser.RecordingMetadata{
+		WorkTitle:     "作品",
+		EpisodeNumber: 5,
+		RecordedDate:  time.Date(2026, 7, 1, 0, 0, 0, 0, time.FixedZone("JST", 9*60*60)),
+	}
+	episodesByWork := map[int][]annict.Episode{
+		1: {{ID: 101, Number: float64Ptr(5), Title: "ep5"}},
+		2: {{ID: 201, Number: float64Ptr(9), Title: "ep9"}},
+	}
+
+	result := Match(meta, works, episodesByWork, nil)
+	if result == nil {
+		t.Fatal("Match returned nil")
+	}
+	if result.Work == nil || result.Work.ID != 1 {
+		t.Errorf("Work = %+v, want work ID 1 narrowed via episode number (reasons: %v)", result.Work, result.Reasons)
+	}
+}
+
+func TestMatchSameSeasonSameTitleStillAmbiguous(t *testing.T) {
+	// Same setup, but the episode number can't disambiguate either
+	// (present, identically, in both candidates): must report the
+	// ambiguous-match error rather than picking one arbitrarily.
+	works := []annict.Work{
+		{ID: 1, Title: "作品", SeasonName: "2026-summer"},
+		{ID: 2, Title: "作品", SeasonName: "2026-summer"},
+	}
+	meta := &parser.RecordingMetadata{
+		WorkTitle:     "作品",
+		EpisodeNumber: 5,
+		RecordedDate:  time.Date(2026, 7, 1, 0, 0, 0, 0, time.FixedZone("JST", 9*60*60)),
+	}
+	episodesByWork := map[int][]annict.Episode{
+		1: {{ID: 101, Number: float64Ptr(5), Title: "ep5"}},
+		2: {{ID: 201, Number: float64Ptr(5), Title: "ep5"}},
+	}
+
+	result := Match(meta, works, episodesByWork, nil)
+	if result == nil {
+		t.Fatal("Match returned nil")
+	}
+	if result.Confidence != 0 {
+		t.Errorf("Confidence = %d, want 0 for still-ambiguous match (reasons: %v)", result.Confidence, result.Reasons)
+	}
+}
+
 func TestNarrowByEpisodeNumberFallsBackToSortNumber(t *testing.T) {
 	// Regression test: episodes without a Number (only SortNumber set, as
 	// Annict sometimes returns for specials) must still be usable to
