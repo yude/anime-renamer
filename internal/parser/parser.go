@@ -29,9 +29,9 @@ var (
 	// #7, #07
 	epPattern2 = regexp.MustCompile(`#(\d+)`)
 
-	// 第N話, 第N幕, 第N番 (arabic digits, suffix required to avoid 第2クール false positive)
-	arabicEpisodePattern = regexp.MustCompile(`第(\d+)([話幕番])`)
-	// 第三話, 第五幕, 第四番, 第十七話 (kanji digits)
+	// 第N話, 第N幕, 第N番, 第N怪 (arabic digits, suffix required to avoid 第2クール false positive)
+	arabicEpisodePattern = regexp.MustCompile(`第(\d+)([話幕番怪])`)
+	// 第三話, 第五幕, 第四番, 第十七話, 第三怪 (kanji digits)
 	kanjiEpisodePattern = regexp.MustCompile(`第([〇一二三四五六七八九十百千]+)([話幕番怪])`)
 
 	// Metadata tag patterns to strip from filenames (SCRename rp1 equivalent).

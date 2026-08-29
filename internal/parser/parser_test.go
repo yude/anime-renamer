@@ -187,6 +187,17 @@ func TestParseFilename(t *testing.T) {
 			wantSub:   "",
 		},
 		{
+			// Regression: arabicEpisodePattern was missing 怪 from its
+			// suffix class even though kanjiEpisodePattern included it,
+			// so this form was previously left entirely unrecognized
+			// (swallowed into the work title, episode number 0).
+			name:      "arabic episode with 怪 suffix",
+			input:     "レッツゴー怪奇組 第3怪 (20260724).mp4",
+			wantTitle: "レッツゴー怪奇組",
+			wantEp:    3,
+			wantSub:   "",
+		},
+		{
 			name:      "season indicator not matched as episode",
 			input:     "ウマ娘 シンデレラグレイ(第2クール) 第21話「有マ記念」 (20260306).mp4",
 			wantTitle: "ウマ娘 シンデレラグレイ(第2クール)",
