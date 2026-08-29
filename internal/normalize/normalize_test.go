@@ -42,6 +42,28 @@ func TestCompare(t *testing.T) {
 	}
 }
 
+func TestNormalizeForSearch(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		// Regression: 《》 are 3-byte UTF-8 runes; stripBracketContent must
+		// skip past their full byte width, not assume 1 byte, or the
+		// surrounding text gets corrupted into invalid UTF-8.
+		{"作品《あ》続き", "作品 続き"},
+		{"からくり撫子《オートマタ》", "からくり撫子"},
+		{"『サブタイトル』", "サブタイトル"},
+		{"作品(2026)", "作品 2026"},
+		{"作品（2026）", "作品 2026"},
+	}
+	for _, tt := range tests {
+		got := NormalizeForSearch(tt.input)
+		if got != tt.expected {
+			t.Errorf("NormalizeForSearch(%q) = %q, want %q", tt.input, got, tt.expected)
+		}
+	}
+}
+
 func TestCollapseSpaces(t *testing.T) {
 	tests := []struct {
 		input    string

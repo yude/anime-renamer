@@ -199,18 +199,23 @@ func toSmallKana(r rune) rune {
 
 // stripBracketContent removes content between matching brackets (inclusive).
 func stripBracketContent(s string, open, close rune) string {
+	// open/close are multi-byte runes (e.g. 《 》), so skipping past them
+	// must advance by their actual UTF-8 byte width, not by 1 byte — doing
+	// so would slice into the middle of the rune and corrupt the string.
+	openStr, closeStr := string(open), string(close)
 	result := s
 	for {
-		start := strings.IndexRune(result, open)
+		start := strings.Index(result, openStr)
 		if start == -1 {
 			break
 		}
-		end := strings.IndexRune(result[start+1:], close)
+		rest := result[start+len(openStr):]
+		end := strings.Index(rest, closeStr)
 		if end == -1 {
 			break
 		}
 		// Remove from open to close (inclusive), replace with space
-		result = result[:start] + " " + result[start+1+end+1:]
+		result = result[:start] + " " + rest[end+len(closeStr):]
 	}
 	return strings.TrimSpace(result)
 }
