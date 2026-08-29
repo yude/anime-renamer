@@ -80,6 +80,33 @@ func TestSearchWorks_GraphQLReturnsEmbeddedEpisodes(t *testing.T) {
 	}
 }
 
+func TestSearchWorks_GraphQL401DoesNotRetry(t *testing.T) {
+	attempts := 0
+	graphql := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer graphql.Close()
+
+	rest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"works":[{"id":4,"title":"REST作品3"}]}`)
+	}))
+	defer rest.Close()
+
+	client := NewClientWithURLs("token", rest.URL, graphql.URL)
+	works, _, err := client.SearchWorks("作品")
+	if err != nil {
+		t.Fatalf("SearchWorks() error = %v", err)
+	}
+	if attempts != 1 {
+		t.Errorf("graphql server received %d attempts, want 1 (401 must not be retried)", attempts)
+	}
+	if len(works) != 1 || works[0].Title != "REST作品3" {
+		t.Errorf("SearchWorks() = %+v, want fallback REST result", works)
+	}
+}
+
 func TestSearchWorks_RESTFallbackReturnsNoEpisodes(t *testing.T) {
 	graphql := alwaysFailServer(t)
 	defer graphql.Close()
@@ -267,5 +294,49 @@ func TestGet_ExhaustsRetriesAndReturnsError(t *testing.T) {
 	}
 	if attempts != 3 {
 		t.Errorf("server received %d attempts, want 3", attempts)
+	}
+}
+
+func TestGet_DoesNotRetryPermanentClientError(t *testing.T) {
+	attempts := 0
+	rest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer rest.Close()
+
+	client := NewClientWithBaseURL("token", rest.URL)
+	_, err := client.searchWorksREST("作品")
+	if err == nil {
+		t.Fatal("searchWorksREST() error = nil, want error on 401")
+	}
+	if attempts != 1 {
+		t.Errorf("server received %d attempts, want 1 (401 must not be retried)", attempts)
+	}
+}
+
+func TestGet_RetriesRateLimitStatus(t *testing.T) {
+	attempts := 0
+	rest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts < 2 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"works":[{"id":10,"title":"レート制限後"}]}`)
+	}))
+	defer rest.Close()
+
+	client := NewClientWithBaseURL("token", rest.URL)
+	works, err := client.searchWorksREST("作品")
+	if err != nil {
+		t.Fatalf("searchWorksREST() error = %v", err)
+	}
+	if attempts != 2 {
+		t.Errorf("server received %d attempts, want 2 (429 must be retried)", attempts)
+	}
+	if len(works) != 1 || works[0].Title != "レート制限後" {
+		t.Errorf("searchWorksREST() = %+v, want single work after retry", works)
 	}
 }

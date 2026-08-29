@@ -39,6 +39,18 @@ const (
 // wait out the real backoff delay.
 var retrySleep = time.Sleep
 
+// isRetryableStatus reports whether an HTTP status code is worth retrying.
+// 4xx responses (bad token, not found, malformed request, ...) are
+// permanent failures that won't succeed on a later attempt except for 429
+// (rate limiting), so retrying them only adds backoff delay to every
+// affected file for no benefit.
+func isRetryableStatus(code int) bool {
+	if code < 400 || code >= 500 {
+		return true
+	}
+	return code == http.StatusTooManyRequests
+}
+
 // Client is an Annict API client.
 type Client struct {
 	accessToken string
@@ -381,6 +393,9 @@ func (c *Client) postGraphQL(query graphqlQuery) ([]byte, error) {
 
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			lastErr = fmt.Errorf("HTTP %d from graphql: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+			if !isRetryableStatus(resp.StatusCode) {
+				return nil, lastErr
+			}
 			continue
 		}
 
@@ -422,6 +437,9 @@ func (c *Client) get(path string, params url.Values, result interface{}) error {
 
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			lastErr = fmt.Errorf("HTTP %d from %s: %s", resp.StatusCode, path, strings.TrimSpace(string(respBody)))
+			if !isRetryableStatus(resp.StatusCode) {
+				return lastErr
+			}
 			continue
 		}
 
