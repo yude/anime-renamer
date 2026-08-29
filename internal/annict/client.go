@@ -180,11 +180,13 @@ func (c *Client) searchWorksGraphQL(title string) ([]Work, map[int][]Episode, er
   }
 }`
 
+	punctNorm := normalizePunctForSearch(title)
+
 	titles := []string{title}
-	if norm := normalizePunctForSearch(title); norm != title {
-		titles = append(titles, norm)
+	if punctNorm != title {
+		titles = append(titles, punctNorm)
 	}
-	if norm := normalize.NormalizeForSearch(title); norm != title && norm != normalizePunctForSearch(title) {
+	if norm := normalize.NormalizeForSearch(title); norm != title && norm != punctNorm {
 		titles = append(titles, norm)
 	}
 	// Deduplicate
