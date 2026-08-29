@@ -62,6 +62,17 @@ func TestBuildPath(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name:         "title and subtitle with filesystem-illegal characters",
+			originalPath: "/recordings/test.mp4",
+			match: &matcher.MatchResult{
+				Work:    &annict.Work{ID: 1, Title: "作品/2"},
+				Episode: &annict.Episode{ID: 1, Number: float64Ptr(1), Title: "A:B?"},
+			},
+			// "/" would otherwise be split into an unintended subdirectory,
+			// and ":" "?" are rejected in file names on Windows.
+			wantPath: "/recordings/作品／2/作品／2 #1 「A：B？」.mp4",
+		},
 	}
 
 	for _, tt := range tests {

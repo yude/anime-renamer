@@ -4,8 +4,25 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/yude/anime-renamer/internal/matcher"
+)
+
+// pathSanitizer replaces characters that are illegal in file or directory
+// names on Windows, macOS, and/or Linux with visually similar full-width
+// equivalents, so a work title or episode subtitle containing them (e.g. a
+// literal "/" or ":") doesn't break directory creation or the rename itself.
+var pathSanitizer = strings.NewReplacer(
+	"/", "／",
+	"\\", "＼",
+	":", "：",
+	"*", "＊",
+	"?", "？",
+	"\"", "″",
+	"<", "＜",
+	">", "＞",
+	"|", "｜",
 )
 
 // RenameResult holds the result of a rename operation.
@@ -39,21 +56,23 @@ func BuildPath(originalPath string, result *matcher.MatchResult) (string, error)
 	}
 
 	// Build output path: <dir>/<WorkTitle>/<WorkTitle> #<N> 「<Subtitle>」.mp4
+	workTitle := pathSanitizer.Replace(result.Work.Title)
 	dir := filepath.Dir(originalPath)
-	workDir := filepath.Join(dir, result.Work.Title)
+	workDir := filepath.Join(dir, workTitle)
 
 	// Use file subtitle when Annict episode has no title
 	subtitle := result.Episode.Title
 	if subtitle == "" {
 		subtitle = result.FileSubtitle
 	}
+	subtitle = pathSanitizer.Replace(subtitle)
 
 	// Format filename: <WorkTitle> #<N> 「<Subtitle>」.mp4
 	var filename string
 	if subtitle != "" {
-		filename = fmt.Sprintf("%s #%d 「%s」.mp4", result.Work.Title, epNum, subtitle)
+		filename = fmt.Sprintf("%s #%d 「%s」.mp4", workTitle, epNum, subtitle)
 	} else {
-		filename = fmt.Sprintf("%s #%d.mp4", result.Work.Title, epNum)
+		filename = fmt.Sprintf("%s #%d.mp4", workTitle, epNum)
 	}
 
 	return filepath.Join(workDir, filename), nil
