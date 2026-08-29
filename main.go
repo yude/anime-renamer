@@ -83,7 +83,7 @@ func main() {
 	fmt.Fprintf(os.Stderr, "Found %d file(s) to process\n\n", len(files))
 
 	// Process each file
-	workCache := make(map[string]*annict.Work)
+	workCache := make(map[string][]annict.Work)
 	episodesCache := make(map[int][]annict.Episode)
 	programsCache := make(map[int][]annict.Program)
 
@@ -119,7 +119,7 @@ func processFile(
 	file string,
 	client *annict.Client,
 	c *cache.Cache,
-	workCache map[string]*annict.Work,
+	workCache map[string][]annict.Work,
 	episodesCache map[int][]annict.Episode,
 	programsCache map[int][]annict.Program,
 	dryRun, verbose bool,
@@ -256,15 +256,19 @@ func workTitles(works []annict.Work) string {
 	return strings.Join(titles, ", ")
 }
 
-func searchWork(client *annict.Client, c *cache.Cache, title string, wc map[string]*annict.Work) ([]annict.Work, error) {
-	// Check cache first
-	if cached, ok := c.GetWork(title); ok {
-		return []annict.Work{*cached}, nil
+func searchWork(client *annict.Client, c *cache.Cache, title string, wc map[string][]annict.Work) ([]annict.Work, error) {
+	// Check in-memory cache first (cheapest, and populated even for
+	// ambiguous results so repeated files of the same show within this run
+	// don't hit the Annict API again).
+	if works, ok := wc[title]; ok {
+		return works, nil
 	}
 
-	// Check in-memory cache
-	if w, ok := wc[title]; ok {
-		return []annict.Work{*w}, nil
+	// Check persistent disk cache (only ever stores unambiguous matches).
+	if cached, ok := c.GetWork(title); ok {
+		works := []annict.Work{*cached}
+		wc[title] = works
+		return works, nil
 	}
 
 	// Search Annict
@@ -273,25 +277,24 @@ func searchWork(client *annict.Client, c *cache.Cache, title string, wc map[stri
 		return nil, err
 	}
 
-	// Cache results
+	wc[title] = works
 	if len(works) == 1 {
 		_ = c.SetWork(title, &works[0])
-		wc[title] = &works[0]
 	}
 
 	return works, nil
 }
 
 func getEpisodes(client *annict.Client, c *cache.Cache, workID int, ec map[int][]annict.Episode) ([]annict.Episode, error) {
-	// Check cache
+	// Check in-memory cache first (cheapest)
+	if eps, ok := ec[workID]; ok {
+		return eps, nil
+	}
+
+	// Check disk cache
 	if cached, ok := c.GetEpisodes(workID); ok {
 		ec[workID] = cached
 		return cached, nil
-	}
-
-	// Check in-memory cache
-	if eps, ok := ec[workID]; ok {
-		return eps, nil
 	}
 
 	// Fetch from API
