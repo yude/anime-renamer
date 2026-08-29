@@ -51,8 +51,8 @@ func TestBuildPath(t *testing.T) {
 		{
 			name:         "nil match",
 			originalPath: "/recordings/test.mp4",
-			match:       nil,
-			wantErr:     true,
+			match:        nil,
+			wantErr:      true,
 		},
 		{
 			name:         "nil episode",
@@ -96,7 +96,7 @@ func TestRenameDryRun(t *testing.T) {
 		Episode: &annict.Episode{ID: 1, Number: float64Ptr(7), Title: "テスト"},
 	}
 
-	r := Rename(src, result, true)
+	r := Rename(src, result, true, "")
 	if r.Error != nil {
 		t.Fatalf("Rename(dry-run) error = %v", r.Error)
 	}
@@ -122,7 +122,7 @@ func TestRenameActual(t *testing.T) {
 		Episode: &annict.Episode{ID: 1, Number: float64Ptr(7), Title: "テスト"},
 	}
 
-	r := Rename(src, result, false)
+	r := Rename(src, result, false, "")
 	if r.Error != nil {
 		t.Fatalf("Rename() error = %v", r.Error)
 	}
@@ -162,8 +162,73 @@ func TestRenameExistingDestination(t *testing.T) {
 		Episode: &annict.Episode{ID: 1, Number: float64Ptr(7), Title: "テスト"},
 	}
 
-	r := Rename(src, result, false)
+	r := Rename(src, result, false, "")
 	if r.Error == nil {
 		t.Error("Rename() should error when destination exists")
+	}
+}
+
+func TestRenameWithOutputDir(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "test.mp4")
+	if err := os.WriteFile(src, []byte("test"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	outputDir := filepath.Join(dir, "out")
+
+	result := &matcher.MatchResult{
+		Work:    &annict.Work{ID: 1, Title: "作品"},
+		Episode: &annict.Episode{ID: 1, Number: float64Ptr(7), Title: "テスト"},
+	}
+
+	r := Rename(src, result, false, outputDir)
+	if r.Error != nil {
+		t.Fatalf("Rename() error = %v", r.Error)
+	}
+	if !r.Renamed {
+		t.Error("Rename() should have renamed the file")
+	}
+
+	expectedPath := filepath.Join(outputDir, "作品", "作品 #7 「テスト」.mp4")
+	if r.NewPath != expectedPath {
+		t.Errorf("Rename() NewPath = %q, want %q", r.NewPath, expectedPath)
+	}
+	if _, err := os.Stat(expectedPath); os.IsNotExist(err) {
+		t.Errorf("renamed file should exist under outputDir at %s", expectedPath)
+	}
+	if _, err := os.Stat(src); !os.IsNotExist(err) {
+		t.Error("original file should not exist after rename")
+	}
+}
+
+func TestRenameDryRunReportsExistingDestination(t *testing.T) {
+	// Regression test: dry-run must surface the same "already exists"
+	// error an actual run would, so previews are accurate.
+	dir := t.TempDir()
+	src := filepath.Join(dir, "test.mp4")
+	dst := filepath.Join(dir, "作品", "作品 #7 「テスト」.mp4")
+
+	if err := os.WriteFile(src, []byte("test"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, []byte("existing"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := &matcher.MatchResult{
+		Work:    &annict.Work{ID: 1, Title: "作品"},
+		Episode: &annict.Episode{ID: 1, Number: float64Ptr(7), Title: "テスト"},
+	}
+
+	r := Rename(src, result, true, "")
+	if r.Error == nil {
+		t.Error("Rename(dry-run) should report an error when destination exists")
+	}
+	if _, err := os.Stat(src); os.IsNotExist(err) {
+		t.Error("dry-run must not touch the original file")
 	}
 }

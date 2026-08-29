@@ -60,8 +60,10 @@ func BuildPath(originalPath string, result *matcher.MatchResult) (string, error)
 }
 
 // Rename performs the actual rename if dryRun is false.
+// If outputDir is non-empty, the destination is relocated there while
+// preserving the <WorkTitle>/<filename> structure computed by BuildPath.
 // Returns the result of the operation.
-func Rename(originalPath string, result *matcher.MatchResult, dryRun bool) *RenameResult {
+func Rename(originalPath string, result *matcher.MatchResult, dryRun bool, outputDir string) *RenameResult {
 	r := &RenameResult{
 		OriginalPath: originalPath,
 		Confidence:   result.Confidence,
@@ -72,6 +74,16 @@ func Rename(originalPath string, result *matcher.MatchResult, dryRun bool) *Rena
 		r.Error = fmt.Errorf("build path: %w", err)
 		return r
 	}
+
+	if outputDir != "" {
+		rel, err := filepath.Rel(filepath.Dir(originalPath), newPath)
+		if err != nil {
+			r.Error = fmt.Errorf("compute output path: %w", err)
+			return r
+		}
+		newPath = filepath.Join(outputDir, rel)
+	}
+
 	r.NewPath = newPath
 	r.WorkTitle = result.Work.Title
 	if result.Episode.Number != nil {

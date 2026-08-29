@@ -49,8 +49,8 @@ func NewDisabled(dir string) *Cache {
 }
 
 type cacheEntry[T any] struct {
-	Data      T         `json:"data"`
-	CachedAt  time.Time `json:"cached_at"`
+	Data     T         `json:"data"`
+	CachedAt time.Time `json:"cached_at"`
 }
 
 // GetWork retrieves a cached work by title.

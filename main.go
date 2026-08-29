@@ -237,41 +237,14 @@ func processFile(
 		}
 	}
 
-	// Step 7: Build destination path
-	newPath, err := renamer.BuildPath(file, result)
-	if err != nil {
-		return &renamer.RenameResult{
-			OriginalPath: file,
-			Error:        fmt.Errorf("build path: %w", err),
-		}
-	}
-
-	// Override output directory if specified
-	if outputDir != "" {
-		rel, err := filepath.Rel(filepath.Dir(file), newPath)
-		if err == nil {
-			newPath = filepath.Join(outputDir, rel)
-		}
-	}
-
-	fmt.Fprintf(os.Stderr, "  Rename:    %s\n", filepath.Base(newPath))
-
-	if dryRun {
-		return &renamer.RenameResult{
-			OriginalPath: file,
-			NewPath:      newPath,
-			WorkTitle:    result.Work.Title,
-			Confidence:   result.Confidence,
-			Renamed:      false,
-		}
-	}
-
-	// Perform rename
-	result2 := renamer.Rename(file, result, false)
+	// Step 7: Rename (or preview in dry-run mode). outputDir, if set, is
+	// honored for both the actual move and the dry-run preview.
+	result2 := renamer.Rename(file, result, dryRun, outputDir)
 	if result2.Error != nil {
 		return result2
 	}
-	result2.NewPath = newPath
+
+	fmt.Fprintf(os.Stderr, "  Rename:    %s\n", filepath.Base(result2.NewPath))
 	return result2
 }
 

@@ -9,13 +9,13 @@ func TestParseFilename(t *testing.T) {
 	jst := time.FixedZone("JST", 9*60*60)
 
 	tests := []struct {
-		name       string
-		input      string
-		wantTitle  string
-		wantEp     int
-		wantSub    string
-		wantDate   time.Time
-		wantErr    bool
+		name      string
+		input     string
+		wantTitle string
+		wantEp    int
+		wantSub   string
+		wantDate  time.Time
+		wantErr   bool
 	}{
 		// === Standard formats ===
 		{
