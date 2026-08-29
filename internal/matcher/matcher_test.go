@@ -190,6 +190,51 @@ func TestSeasonNarrowing(t *testing.T) {
 	}
 }
 
+func TestNarrowByEpisodeNumberFallsBackToSortNumber(t *testing.T) {
+	// Regression test: episodes without a Number (only SortNumber set, as
+	// Annict sometimes returns for specials) must still be usable to
+	// disambiguate between same-titled works, consistent with
+	// findMatchingEpisode's own SortNumber fallback.
+	works := []annict.Work{
+		{ID: 1, Title: "作品A"},
+		{ID: 2, Title: "作品B"},
+	}
+	episodesByWork := map[int][]annict.Episode{
+		1: {{ID: 101, SortNumber: 5}},
+		2: {{ID: 201, SortNumber: 9}},
+	}
+
+	got := narrowByEpisodeNumber(works, 5, episodesByWork)
+	if got == nil || got.ID != 1 {
+		t.Errorf("narrowByEpisodeNumber() = %+v, want work ID 1 via SortNumber fallback", got)
+	}
+}
+
+func TestMatchMultipleWorksNarrowedByEpisodeSortNumber(t *testing.T) {
+	works := []annict.Work{
+		{ID: 1, Title: "作品A"},
+		{ID: 2, Title: "作品A"},
+	}
+
+	meta := &parser.RecordingMetadata{
+		WorkTitle:     "作品A",
+		EpisodeNumber: 5,
+	}
+
+	episodesByWork := map[int][]annict.Episode{
+		1: {{ID: 101, SortNumber: 5, Title: "ep5"}},
+		2: {{ID: 201, SortNumber: 9, Title: "ep9"}},
+	}
+
+	result := Match(meta, works, episodesByWork, nil)
+	if result == nil {
+		t.Fatal("Match returned nil")
+	}
+	if result.Work == nil || result.Work.ID != 1 {
+		t.Errorf("Work = %+v, want work ID 1 narrowed via SortNumber (reasons: %v)", result.Work, result.Reasons)
+	}
+}
+
 func float64Ptr(f float64) *float64 {
 	return &f
 }

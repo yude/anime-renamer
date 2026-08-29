@@ -259,8 +259,8 @@ func narrowByEpisodeNumber(works []annict.Work, episodeNum int, episodesByWork m
 	var match *annict.Work
 	for i := range works {
 		episodes := episodesByWork[works[i].ID]
-		for _, ep := range episodes {
-			if ep.Number != nil && int(*ep.Number) == episodeNum {
+		for j := range episodes {
+			if episodeNumberMatches(&episodes[j], episodeNum) {
 				if match != nil {
 					return nil // ambiguous
 				}
@@ -295,17 +295,17 @@ func narrowByEpisodeNumber(works []annict.Work, episodeNum int, episodesByWork m
 			if len(baseEpisodes) > 0 {
 				// Find the max episode number in the base work
 				maxBaseEp := 0
-				for _, ep := range baseEpisodes {
-					if ep.Number != nil && int(*ep.Number) > maxBaseEp {
-						maxBaseEp = int(*ep.Number)
+				for j := range baseEpisodes {
+					if n := episodeNumberOf(&baseEpisodes[j]); n > maxBaseEp {
+						maxBaseEp = n
 					}
 				}
 				// If the file's episode number exceeds the base's max, try matching with offset
 				if episodeNum > maxBaseEp {
 					offset := episodeNum - maxBaseEp
 					kourEpisodes := episodesByWork[kourWork.ID]
-					for _, ep := range kourEpisodes {
-						if ep.Number != nil && int(*ep.Number) == offset {
+					for j := range kourEpisodes {
+						if episodeNumberMatches(&kourEpisodes[j], offset) {
 							return kourWork
 						}
 					}
@@ -338,6 +338,21 @@ func workTitles(works []annict.Work) string {
 	return strings.Join(titles, ", ")
 }
 
+// episodeNumberOf returns an episode's effective number: its Number if set,
+// otherwise its SortNumber.
+func episodeNumberOf(e *annict.Episode) int {
+	if e.Number != nil {
+		return int(*e.Number)
+	}
+	return e.SortNumber
+}
+
+// episodeNumberMatches reports whether an episode's effective number (its
+// Number if set, otherwise its SortNumber) equals the given number.
+func episodeNumberMatches(e *annict.Episode, number int) bool {
+	return episodeNumberOf(e) == number
+}
+
 // findMatchingEpisode finds an episode matching the given number and subtitle.
 func findMatchingEpisode(number int, subtitle string, episodes []annict.Episode) *annict.Episode {
 	var numberMatch *annict.Episode
@@ -345,15 +360,8 @@ func findMatchingEpisode(number int, subtitle string, episodes []annict.Episode)
 
 	for i := range episodes {
 		e := &episodes[i]
-		numOK := false
 
-		if e.Number != nil && int(*e.Number) == number {
-			numOK = true
-		} else if e.Number == nil && e.SortNumber == number {
-			numOK = true
-		}
-
-		if numOK {
+		if episodeNumberMatches(e, number) {
 			if numberMatch == nil {
 				numberMatch = e
 			}
