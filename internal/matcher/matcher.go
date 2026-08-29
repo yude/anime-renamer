@@ -64,6 +64,11 @@ func Match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 
 	// If multiple candidates, try to narrow down by season
 	work := candidateWorks[0]
+	// The episode number to actually look up in work's episode list. Equal
+	// to meta.EpisodeNumber unless narrowByEpisodeNumber resolves the match
+	// via its multi-cour offset heuristic, in which case it's the
+	// offset-adjusted number within the resolved (2nd-cour) work.
+	episodeNumberForMatch := meta.EpisodeNumber
 	if len(candidateWorks) > 1 {
 		if !meta.RecordedDate.IsZero() {
 			seasonYear := SeasonYearFromMonth(meta.RecordedDate)
@@ -82,7 +87,8 @@ func Match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 					// Try narrowing by episode number range
 					epMatched := narrowByEpisodeNumber(narrowed, meta.EpisodeNumber, episodesByWork)
 					if epMatched != nil {
-						work = *epMatched
+						work = *epMatched.Work
+						episodeNumberForMatch = epMatched.EpisodeNumber
 					} else {
 						return &MatchResult{
 							Confidence: 0,
@@ -106,7 +112,8 @@ func Match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 				if meta.EpisodeNumber > 0 {
 					epMatched := narrowByEpisodeNumber(candidateWorks, meta.EpisodeNumber, episodesByWork)
 					if epMatched != nil {
-						work = *epMatched
+						work = *epMatched.Work
+						episodeNumberForMatch = epMatched.EpisodeNumber
 					} else {
 						return &MatchResult{
 							Confidence: 0,
@@ -130,7 +137,8 @@ func Match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 			// No date, try narrowing by episode number
 			epMatched := narrowByEpisodeNumber(candidateWorks, meta.EpisodeNumber, episodesByWork)
 			if epMatched != nil {
-				work = *epMatched
+				work = *epMatched.Work
+				episodeNumberForMatch = epMatched.EpisodeNumber
 			} else {
 				return &MatchResult{
 					Confidence: 0,
@@ -156,14 +164,14 @@ func Match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 	// Step 2: Find matching episode
 	episodes := episodesByWork[work.ID]
 	if meta.EpisodeNumber > 0 && len(episodes) > 0 {
-		episode := findMatchingEpisode(meta.EpisodeNumber, meta.Subtitle, episodes)
+		episode := findMatchingEpisode(episodeNumberForMatch, meta.Subtitle, episodes)
 		if episode != nil {
 			result.Episode = episode
 			result.Confidence += 40
 			result.Reasons = append(result.Reasons, "work title match")
 
 			result.Confidence += 30
-			result.Reasons = append(result.Reasons, fmt.Sprintf("episode number %d matched", meta.EpisodeNumber))
+			result.Reasons = append(result.Reasons, fmt.Sprintf("episode number %d matched", episodeNumberForMatch))
 
 			if meta.Subtitle == "" {
 				result.Confidence += 20
@@ -184,7 +192,7 @@ func Match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 		} else {
 			result.Confidence += 40
 			result.Reasons = append(result.Reasons, "work title match")
-			result.Reasons = append(result.Reasons, fmt.Sprintf("episode %d not found in %d episodes", meta.EpisodeNumber, len(episodes)))
+			result.Reasons = append(result.Reasons, fmt.Sprintf("episode %d not found in %d episodes", episodeNumberForMatch, len(episodes)))
 		}
 	} else if meta.EpisodeNumber > 0 && len(episodes) == 0 {
 		// Work matched but episodes unavailable (API error or not fetched)
@@ -251,11 +259,20 @@ func narrowBySeason(works []annict.Work, seasonYear int, seasonName string) []an
 	return result
 }
 
+// episodeNumberNarrowing is the result of narrowByEpisodeNumber: which work
+// matched, and the episode number to actually look up within that work's
+// episode list (equal to the input episodeNum, unless the multi-cour offset
+// heuristic below fired, in which case it's the offset-adjusted number).
+type episodeNumberNarrowing struct {
+	Work          *annict.Work
+	EpisodeNumber int
+}
+
 // narrowByEpisodeNumber returns the single work whose episodes contain the given number.
 // For multi-cour works (e.g., "鎧真伝サムライトルーパー" + "鎧真伝サムライトルーパー 第2クール"),
 // if the episode number exceeds the first cour's count, tries to match against the 2nd cour
 // with an offset.
-func narrowByEpisodeNumber(works []annict.Work, episodeNum int, episodesByWork map[int][]annict.Episode) *annict.Work {
+func narrowByEpisodeNumber(works []annict.Work, episodeNum int, episodesByWork map[int][]annict.Episode) *episodeNumberNarrowing {
 	var match *annict.Work
 	for i := range works {
 		episodes := episodesByWork[works[i].ID]
@@ -269,9 +286,12 @@ func narrowByEpisodeNumber(works []annict.Work, episodeNum int, episodesByWork m
 			}
 		}
 	}
+	if match != nil {
+		return &episodeNumberNarrowing{Work: match, EpisodeNumber: episodeNum}
+	}
 
 	// If no direct match, try to find a "第Nクール" variant with offset matching
-	if match == nil && len(works) > 1 {
+	if len(works) > 1 {
 		// Find the base work (longest episode list) and the kour variant
 		var baseWork *annict.Work
 		var kourWork *annict.Work
@@ -306,7 +326,7 @@ func narrowByEpisodeNumber(works []annict.Work, episodeNum int, episodesByWork m
 					kourEpisodes := episodesByWork[kourWork.ID]
 					for j := range kourEpisodes {
 						if episodeNumberMatches(&kourEpisodes[j], offset) {
-							return kourWork
+							return &episodeNumberNarrowing{Work: kourWork, EpisodeNumber: offset}
 						}
 					}
 				}
@@ -314,7 +334,7 @@ func narrowByEpisodeNumber(works []annict.Work, episodeNum int, episodesByWork m
 		}
 	}
 
-	return match
+	return nil
 }
 
 // filterExactTitle returns works with exact title match.

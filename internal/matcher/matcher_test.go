@@ -2,6 +2,7 @@ package matcher
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -205,8 +206,8 @@ func TestNarrowByEpisodeNumberFallsBackToSortNumber(t *testing.T) {
 	}
 
 	got := narrowByEpisodeNumber(works, 5, episodesByWork)
-	if got == nil || got.ID != 1 {
-		t.Errorf("narrowByEpisodeNumber() = %+v, want work ID 1 via SortNumber fallback", got)
+	if got == nil || got.Work.ID != 1 || got.EpisodeNumber != 5 {
+		t.Errorf("narrowByEpisodeNumber() = %+v, want work ID 1 episode 5 via SortNumber fallback", got)
 	}
 }
 
@@ -232,6 +233,59 @@ func TestMatchMultipleWorksNarrowedByEpisodeSortNumber(t *testing.T) {
 	}
 	if result.Work == nil || result.Work.ID != 1 {
 		t.Errorf("Work = %+v, want work ID 1 narrowed via SortNumber (reasons: %v)", result.Work, result.Reasons)
+	}
+}
+
+func TestMatchMultiCourOffsetFindsCorrectEpisode(t *testing.T) {
+	// Regression test: narrowByEpisodeNumber's multi-cour offset heuristic
+	// picks the 2nd-cour work when the absolute episode number exceeds the
+	// 1st cour's episode count, but Match() must then look up the
+	// *offset-adjusted* episode number within that work's own episode list
+	// (which restarts at 1), not the original absolute number.
+	//
+	// Both works must land in candidateWorks together for this heuristic to
+	// even run: findMatchingWorks only falls back to substring matching when
+	// NO candidate is an exact title match, so the parsed title here is a
+	// strict substring of both work titles rather than equal to either.
+	baseEpisodes := make([]annict.Episode, 12)
+	for i := range baseEpisodes {
+		baseEpisodes[i] = annict.Episode{ID: 100 + i + 1, Number: float64Ptr(float64(i + 1)), Title: fmt.Sprintf("base-ep%d", i+1)}
+	}
+	kourEpisodes := make([]annict.Episode, 8)
+	for i := range kourEpisodes {
+		kourEpisodes[i] = annict.Episode{ID: 200 + i + 1, Number: float64Ptr(float64(i + 1)), Title: fmt.Sprintf("kour-ep%d", i+1)}
+	}
+
+	works := []annict.Work{
+		{ID: 1, Title: "作品X"},
+		{ID: 2, Title: "作品X 第2クール"},
+	}
+	episodesByWork := map[int][]annict.Episode{
+		1: baseEpisodes,
+		2: kourEpisodes,
+	}
+
+	meta := &parser.RecordingMetadata{
+		WorkTitle:     "作品",
+		EpisodeNumber: 15, // absolute; offset within the 2nd cour is 15-12=3
+		Subtitle:      "kour-ep3",
+	}
+
+	result := Match(meta, works, episodesByWork, nil)
+	if result == nil {
+		t.Fatal("Match returned nil")
+	}
+	if result.Work == nil || result.Work.ID != 2 {
+		t.Fatalf("Work = %+v, want the 2nd-cour work (ID 2) (reasons: %v)", result.Work, result.Reasons)
+	}
+	if result.Episode == nil {
+		t.Fatalf("Episode is nil, want offset episode 3 of the 2nd cour (reasons: %v)", result.Reasons)
+	}
+	if result.Episode.ID != 203 {
+		t.Errorf("Episode.ID = %d, want 203 (kour-ep3, offset 15-12=3)", result.Episode.ID)
+	}
+	if result.Confidence < AutoRenameThreshold {
+		t.Errorf("Confidence = %d, want >= %d (reasons: %v)", result.Confidence, AutoRenameThreshold, result.Reasons)
 	}
 }
 
