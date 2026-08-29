@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -238,8 +240,16 @@ func TestGetPrograms_SendsDateRangeAndWorkID(t *testing.T) {
 		if got := q.Get("filter_started_at_lt"); got != until.Format("2006/01/02 15:04") {
 			t.Errorf("filter_started_at_lt = %q, want %q", got, until.Format("2006/01/02 15:04"))
 		}
+		// Regression: "episode" must be in the requested field list, or
+		// Annict's real API omits it from the response entirely, leaving
+		// Program.Episode.ID at zero and silently breaking
+		// findMatchingProgram's episode-ID matching.
+		fields := strings.Split(q.Get("fields"), ",")
+		if !slices.Contains(fields, "episode") {
+			t.Errorf("fields = %q, must include \"episode\"", q.Get("fields"))
+		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"programs":[{"id":1,"is_rebroadcast":false}]}`)
+		fmt.Fprint(w, `{"programs":[{"id":1,"is_rebroadcast":false,"episode":{"id":42}}]}`)
 	}))
 	defer rest.Close()
 
@@ -247,6 +257,9 @@ func TestGetPrograms_SendsDateRangeAndWorkID(t *testing.T) {
 	programs, err := client.GetPrograms(7, since, until)
 	if err != nil {
 		t.Fatalf("GetPrograms() error = %v", err)
+	}
+	if len(programs) == 1 && programs[0].Episode.ID != 42 {
+		t.Errorf("programs[0].Episode.ID = %d, want 42", programs[0].Episode.ID)
 	}
 	if len(programs) != 1 {
 		t.Fatalf("GetPrograms() returned %d programs, want 1", len(programs))

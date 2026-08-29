@@ -335,7 +335,11 @@ func (c *Client) GetPrograms(workID int, since, until time.Time) ([]Program, err
 		params.Set("filter_work_ids", strconv.Itoa(workID))
 		params.Set("filter_started_at_gt", since.Format("2006/01/02 15:04"))
 		params.Set("filter_started_at_lt", until.Format("2006/01/02 15:04"))
-		params.Set("fields", "id,started_at,is_rebroadcast,channel")
+		// "episode" must be requested explicitly (like "channel" already
+		// was) or Annict omits it from the response entirely, leaving
+		// Program.Episode.ID at its zero value — silently disabling
+		// findMatchingProgram's episode-ID matching.
+		params.Set("fields", "id,started_at,is_rebroadcast,channel,episode")
 		params.Set("sort_started_at", "asc")
 		params.Set("per_page", "50")
 		params.Set("page", strconv.Itoa(page))
