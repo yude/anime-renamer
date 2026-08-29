@@ -289,6 +289,50 @@ func TestMatchMultiCourOffsetFindsCorrectEpisode(t *testing.T) {
 	}
 }
 
+func TestSubtitlePartialMatch(t *testing.T) {
+	tests := []struct {
+		name   string
+		a, b   string
+		expect bool
+	}{
+		{
+			name:   "exact match after normalization",
+			a:      "サブタイトル",
+			b:      "サブタイトル",
+			expect: true,
+		},
+		{
+			name:   "one contains the other, both long enough",
+			a:      "エピソードタイトル",
+			b:      "タイトル",
+			expect: true,
+		},
+		{
+			name: "single shared kanji must not count as a match",
+			// Regression: a byte-length check here (3 bytes for one kanji)
+			// let a single shared character pass the "long enough" guard;
+			// counting runes correctly requires more than 2 characters.
+			a:      "怪",
+			b:      "本当は怖い怪談集",
+			expect: false,
+		},
+		{
+			name:   "unrelated subtitles",
+			a:      "サブタイトルA",
+			b:      "サブタイトルB",
+			expect: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := subtitlePartialMatch(tt.a, tt.b); got != tt.expect {
+				t.Errorf("subtitlePartialMatch(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.expect)
+			}
+		})
+	}
+}
+
 func float64Ptr(f float64) *float64 {
 	return &f
 }

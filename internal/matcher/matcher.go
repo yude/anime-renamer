@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/yude/anime-renamer/internal/annict"
 	"github.com/yude/anime-renamer/internal/normalize"
@@ -448,8 +449,12 @@ func subtitlePartialMatch(a, b string) bool {
 	if na == nb {
 		return true
 	}
-	// Check if one contains the other
-	if len(na) > 2 && len(nb) > 2 {
+	// Check if one contains the other, but only once both sides are long
+	// enough that a shared substring is meaningful. Must count runes, not
+	// bytes: a single Japanese character is already 3 bytes, so a byte
+	// length check here would let e.g. one shared kanji between two
+	// otherwise-unrelated subtitles register as a "partial match".
+	if utf8.RuneCountInString(na) > 2 && utf8.RuneCountInString(nb) > 2 {
 		if strings.Contains(na, nb) || strings.Contains(nb, na) {
 			return true
 		}
