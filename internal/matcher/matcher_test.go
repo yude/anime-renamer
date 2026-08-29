@@ -11,6 +11,47 @@ import (
 	"github.com/yude/anime-renamer/internal/parser"
 )
 
+func TestMonthToSeasonAndSeasonYear(t *testing.T) {
+	jst := time.FixedZone("JST", 9*60*60)
+	tests := []struct {
+		month      time.Month
+		wantSeason string
+		wantYear   int // for a 2026 date
+	}{
+		{time.January, "winter", 2025},
+		{time.February, "winter", 2025},
+		{time.March, "winter", 2025},
+		{time.April, "spring", 2026},
+		{time.May, "spring", 2026},
+		{time.June, "spring", 2026},
+		{time.July, "summer", 2026},
+		{time.August, "summer", 2026},
+		{time.September, "summer", 2026},
+		{time.October, "autumn", 2026},
+		{time.November, "autumn", 2026},
+		// Regression: December was miscategorized as "winter" (falling
+		// into the default case), disagreeing with Annict's own 3-month
+		// cour convention where autumn runs Oct-Dec. That mismatch made
+		// narrowBySeason fail to find the correct work for any December
+		// recording, since its computed season string never matched what
+		// Annict actually has for an autumn-season work.
+		{time.December, "autumn", 2026},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.month.String(), func(t *testing.T) {
+			if got := monthToSeason(tt.month); got != tt.wantSeason {
+				t.Errorf("monthToSeason(%s) = %q, want %q", tt.month, got, tt.wantSeason)
+			}
+
+			date := time.Date(2026, tt.month, 15, 0, 0, 0, 0, jst)
+			if got := SeasonYearFromMonth(date); got != tt.wantYear {
+				t.Errorf("SeasonYearFromMonth(%s 2026) = %d, want %d", tt.month, got, tt.wantYear)
+			}
+		})
+	}
+}
+
 func loadFixture[T any](t *testing.T, path string) T {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -188,6 +229,32 @@ func TestSeasonNarrowing(t *testing.T) {
 	}
 	if result.Confidence < AutoRenameThreshold {
 		t.Errorf("Confidence = %d, want >= %d (reasons: %v)", result.Confidence, AutoRenameThreshold, result.Reasons)
+	}
+}
+
+func TestSeasonNarrowingForDecemberRecording(t *testing.T) {
+	// Regression test for the monthToSeason December bug: a December
+	// recording must narrow against a work registered in Annict's
+	// "autumn" season (Oct-Dec), not fail to match against "winter".
+	works := []annict.Work{
+		{ID: 1, Title: "作品", SeasonName: "2026-autumn"},
+		{ID: 2, Title: "作品", SeasonName: "2020-autumn"},
+	}
+	meta := &parser.RecordingMetadata{
+		WorkTitle:     "作品",
+		EpisodeNumber: 10,
+		RecordedDate:  time.Date(2026, 12, 5, 0, 0, 0, 0, time.FixedZone("JST", 9*60*60)),
+	}
+	episodesByWork := map[int][]annict.Episode{
+		1: {{ID: 101, Number: float64Ptr(10), Title: "ep10"}},
+	}
+
+	result := Match(meta, works, episodesByWork, nil)
+	if result == nil {
+		t.Fatal("Match returned nil")
+	}
+	if result.Work == nil || result.Work.ID != 1 {
+		t.Errorf("Work = %+v, want work ID 1 narrowed by season 2026-autumn (reasons: %v)", result.Work, result.Reasons)
 	}
 }
 

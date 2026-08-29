@@ -27,16 +27,18 @@ const (
 	DryRunThreshold     = 70
 )
 
-// Season mapping from month to Annict season name.
+// Season mapping from month to Annict season name. Each season is exactly
+// a 3-month cour: winter=Jan-Mar, spring=Apr-Jun, summer=Jul-Sep,
+// autumn=Oct-Dec.
 func monthToSeason(month time.Month) string {
 	switch {
 	case month >= 4 && month <= 6:
 		return "spring"
 	case month >= 7 && month <= 9:
 		return "summer"
-	case month >= 10 && month <= 11:
+	case month >= 10:
 		return "autumn"
-	default: // 12, 1, 2, 3
+	default: // 1, 2, 3
 		return "winter"
 	}
 }
