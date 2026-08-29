@@ -237,31 +237,3 @@ func StripMetadataTags(s string) string {
 	}
 	return strings.TrimSpace(s)
 }
-
-// extractLastSubtitle finds and removes the last 「...」 from name.
-func extractLastSubtitle(name string, subtitle *string) string {
-	runes := []rune(name)
-
-	// Find last 「...」 pair by scanning from right
-	closeIdx := -1
-	openIdx := -1
-	for i := len(runes) - 1; i >= 0; i-- {
-		if runes[i] == '」' && closeIdx == -1 {
-			closeIdx = i
-		} else if runes[i] == '「' && closeIdx > 0 {
-			openIdx = i
-			break
-		}
-	}
-
-	if openIdx >= 0 && closeIdx > openIdx {
-		*subtitle = string(runes[openIdx+1 : closeIdx])
-		// Remove 「subtitle」 and surrounding whitespace
-		result := make([]rune, 0, len(runes))
-		result = append(result, runes[:openIdx]...)
-		result = append(result, runes[closeIdx+1:]...)
-		return strings.TrimSpace(string(result))
-	}
-
-	return name
-}
