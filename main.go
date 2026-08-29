@@ -143,7 +143,7 @@ func processFile(
 		meta.RecordedDate.Format("2006-01-02"))
 
 	// Step 2: Search Annict for work
-	works, err := searchWork(client, c, meta.WorkTitle, workCache)
+	works, err := searchWork(client, c, meta.WorkTitle, workCache, episodesCache)
 	if err != nil {
 		return &renamer.RenameResult{
 			OriginalPath: file,
@@ -256,7 +256,7 @@ func workTitles(works []annict.Work) string {
 	return strings.Join(titles, ", ")
 }
 
-func searchWork(client *annict.Client, c *cache.Cache, title string, wc map[string][]annict.Work) ([]annict.Work, error) {
+func searchWork(client *annict.Client, c *cache.Cache, title string, wc map[string][]annict.Work, ec map[int][]annict.Episode) ([]annict.Work, error) {
 	// Check in-memory cache first (cheapest, and populated even for
 	// ambiguous results so repeated files of the same show within this run
 	// don't hit the Annict API again).
@@ -272,7 +272,7 @@ func searchWork(client *annict.Client, c *cache.Cache, title string, wc map[stri
 	}
 
 	// Search Annict
-	works, err := client.SearchWorks(title)
+	works, episodesByWork, err := client.SearchWorks(title)
 	if err != nil {
 		return nil, err
 	}
@@ -282,7 +282,30 @@ func searchWork(client *annict.Client, c *cache.Cache, title string, wc map[stri
 		_ = c.SetWork(title, &works[0])
 	}
 
+	// The GraphQL search response already includes up to 100 episodes per
+	// work. Reuse them directly instead of a redundant REST call, but only
+	// when they fully cover the work's known episode count — otherwise
+	// getEpisodes falls back to the paginated REST fetch as usual.
+	for _, w := range works {
+		episodes, ok := episodesByWork[w.ID]
+		if !ok || !episodesComplete(w, episodes) {
+			continue
+		}
+		if _, cached := ec[w.ID]; cached {
+			continue
+		}
+		ec[w.ID] = episodes
+		_ = c.SetEpisodes(w.ID, episodes)
+	}
+
 	return works, nil
+}
+
+// episodesComplete reports whether episodes (as returned alongside a
+// GraphQL work search) fully covers the work's known episode count, i.e.
+// it's safe to use directly instead of falling back to a full REST fetch.
+func episodesComplete(w annict.Work, episodes []annict.Episode) bool {
+	return w.EpisodesCount > 0 && len(episodes) >= w.EpisodesCount
 }
 
 func getEpisodes(client *annict.Client, c *cache.Cache, workID int, ec map[int][]annict.Episode) ([]annict.Episode, error) {

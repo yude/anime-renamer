@@ -35,12 +35,68 @@ func TestSearchWorks_GraphQLSuccessSkipsREST(t *testing.T) {
 	defer rest.Close()
 
 	client := NewClientWithURLs("token", rest.URL, graphql.URL)
-	works, err := client.SearchWorks("作品")
+	works, _, err := client.SearchWorks("作品")
 	if err != nil {
 		t.Fatalf("SearchWorks() error = %v", err)
 	}
 	if len(works) != 1 || works[0].Title != "作品" || works[0].ID != 1 {
 		t.Errorf("SearchWorks() = %+v, want single work with ID=1 Title=作品", works)
+	}
+}
+
+func TestSearchWorks_GraphQLReturnsEmbeddedEpisodes(t *testing.T) {
+	graphql := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[
+			{"node":{"annictId":1,"title":"作品","episodesCount":2,"episodes":{"edges":[
+				{"node":{"id":"101","number":1,"sortNumber":1,"title":"第一話"}},
+				{"node":{"id":"102","number":2,"sortNumber":2,"title":"第二話"}}
+			]}}}
+		]}}}`)
+	}))
+	defer graphql.Close()
+
+	rest := alwaysFailServer(t)
+	defer rest.Close()
+
+	client := NewClientWithURLs("token", rest.URL, graphql.URL)
+	works, episodesByWork, err := client.SearchWorks("作品")
+	if err != nil {
+		t.Fatalf("SearchWorks() error = %v", err)
+	}
+	if len(works) != 1 {
+		t.Fatalf("SearchWorks() = %+v, want 1 work", works)
+	}
+
+	episodes, ok := episodesByWork[1]
+	if !ok {
+		t.Fatal("episodesByWork missing entry for work ID 1")
+	}
+	if len(episodes) != 2 {
+		t.Fatalf("episodes = %+v, want 2 entries", episodes)
+	}
+	if episodes[0].ID != 101 || episodes[0].Number == nil || int(*episodes[0].Number) != 1 || episodes[0].SortNumber != 1 || episodes[0].Title != "第一話" || episodes[0].WorkID != 1 {
+		t.Errorf("episodes[0] = %+v, unexpected field values", episodes[0])
+	}
+}
+
+func TestSearchWorks_RESTFallbackReturnsNoEpisodes(t *testing.T) {
+	graphql := alwaysFailServer(t)
+	defer graphql.Close()
+
+	rest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"works":[{"id":2,"title":"REST作品"}]}`)
+	}))
+	defer rest.Close()
+
+	client := NewClientWithURLs("token", rest.URL, graphql.URL)
+	_, episodesByWork, err := client.SearchWorks("作品")
+	if err != nil {
+		t.Fatalf("SearchWorks() error = %v", err)
+	}
+	if episodesByWork != nil {
+		t.Errorf("episodesByWork = %+v, want nil for the REST fallback path", episodesByWork)
 	}
 }
 
@@ -61,7 +117,7 @@ func TestSearchWorks_FallsBackToRESTOnGraphQLError(t *testing.T) {
 	defer rest.Close()
 
 	client := NewClientWithURLs("token", rest.URL, graphql.URL)
-	works, err := client.SearchWorks("作品")
+	works, _, err := client.SearchWorks("作品")
 	if err != nil {
 		t.Fatalf("SearchWorks() error = %v", err)
 	}
@@ -84,7 +140,7 @@ func TestSearchWorks_FallsBackToRESTOnEmptyGraphQLResult(t *testing.T) {
 	defer rest.Close()
 
 	client := NewClientWithURLs("token", rest.URL, graphql.URL)
-	works, err := client.SearchWorks("作品")
+	works, _, err := client.SearchWorks("作品")
 	if err != nil {
 		t.Fatalf("SearchWorks() error = %v", err)
 	}

@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/yude/anime-renamer/internal/annict"
 )
 
 func writeEnvFile(t *testing.T, dir, token string) {
@@ -118,5 +120,41 @@ func TestCollectFiles_DirectoryRecursive(t *testing.T) {
 	}
 	if len(files) != 2 {
 		t.Errorf("collectFiles(recursive) returned %d files, want 2: %v", len(files), files)
+	}
+}
+
+func TestEpisodesComplete(t *testing.T) {
+	tests := []struct {
+		name     string
+		work     annict.Work
+		episodes []annict.Episode
+		want     bool
+	}{
+		{
+			name:     "fully covered",
+			work:     annict.Work{EpisodesCount: 2},
+			episodes: []annict.Episode{{ID: 1}, {ID: 2}},
+			want:     true,
+		},
+		{
+			name:     "truncated by GraphQL's 100-episode cap",
+			work:     annict.Work{EpisodesCount: 150},
+			episodes: make([]annict.Episode, 100),
+			want:     false,
+		},
+		{
+			name:     "unknown episode count must not be trusted",
+			work:     annict.Work{EpisodesCount: 0},
+			episodes: []annict.Episode{{ID: 1}},
+			want:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := episodesComplete(tt.work, tt.episodes); got != tt.want {
+				t.Errorf("episodesComplete() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

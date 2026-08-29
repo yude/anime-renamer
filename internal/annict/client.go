@@ -122,50 +122,37 @@ type graphqlWorkNode struct {
 				ID         string   `json:"id"`
 				Number     *float64 `json:"number"`
 				NumberText string   `json:"numberText"`
+				SortNumber int      `json:"sortNumber"`
 				Title      string   `json:"title"`
 			} `json:"node"`
 		} `json:"edges"`
 	} `json:"episodes"`
 }
 
-// graphqlEpisode is like Episode but with string ID for GraphQL responses.
-type graphqlEpisode struct {
-	ID         string   `json:"id"`
-	Number     *float64 `json:"number"`
-	NumberText string   `json:"numberText"`
-	SortNumber int      `json:"sortNumber"`
-	Title      string   `json:"title"`
-}
-
-// graphqlWorkWithEpisodes represents a work with nested episodes from GraphQL.
-type graphqlWorkWithEpisodes struct {
-	Work struct {
-		AnnictID   int    `json:"annictId"`
-		Title      string `json:"title"`
-		SeasonName string `json:"seasonName"`
-		SeasonYear int    `json:"seasonYear"`
-		Episodes   struct {
-			Edges []struct {
-				Node graphqlEpisode `json:"node"`
-			} `json:"edges"`
-		} `json:"episodes"`
-	} `json:"work"`
-}
-
-// SearchWorks searches for works by title using GraphQL API.
-func (c *Client) SearchWorks(title string) ([]Work, error) {
+// SearchWorks searches for works by title using the GraphQL API, falling
+// back to the REST API if GraphQL fails or finds nothing.
+//
+// The GraphQL response also includes up to 100 episodes per work (already
+// fetched as part of the same query), returned here keyed by work ID so
+// callers with a small/complete work don't need a second round-trip to the
+// REST episodes endpoint. A work whose EpisodesCount exceeds what GraphQL
+// returned is truncated in this map; callers must fall back to GetEpisodes
+// for those. The REST fallback path never populates this map, since the
+// REST search endpoint doesn't return episode data.
+func (c *Client) SearchWorks(title string) ([]Work, map[int][]Episode, error) {
 	// Try GraphQL first
-	works, err := c.searchWorksGraphQL(title)
+	works, episodesByWork, err := c.searchWorksGraphQL(title)
 	if err == nil && len(works) > 0 {
-		return works, nil
+		return works, episodesByWork, nil
 	}
 
 	// Fallback to REST API
-	return c.searchWorksREST(title)
+	works, err = c.searchWorksREST(title)
+	return works, nil, err
 }
 
 // searchWorksGraphQL uses the GraphQL API to search for works.
-func (c *Client) searchWorksGraphQL(title string) ([]Work, error) {
+func (c *Client) searchWorksGraphQL(title string) ([]Work, map[int][]Episode, error) {
 	query := `query SearchWorks($titles: [String!]!) {
   searchWorks(titles: $titles) {
     edges {
@@ -183,6 +170,7 @@ func (c *Client) searchWorksGraphQL(title string) ([]Work, error) {
               id
               number
               numberText
+              sortNumber
               title
             }
           }
@@ -221,24 +209,25 @@ func (c *Client) searchWorksGraphQL(title string) ([]Work, error) {
 
 	body, err := c.postGraphQL(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("graphql search works: %w", err)
+		return nil, nil, fmt.Errorf("graphql search works: %w", err)
 	}
 
 	var resp graphqlResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, fmt.Errorf("decode graphql response: %w", err)
+		return nil, nil, fmt.Errorf("decode graphql response: %w", err)
 	}
 
 	if len(resp.Errors) > 0 {
-		return nil, fmt.Errorf("graphql error: %s", resp.Errors[0].Message)
+		return nil, nil, fmt.Errorf("graphql error: %s", resp.Errors[0].Message)
 	}
 
 	var searchResp graphqlSearchWorksResponse
 	if err := json.Unmarshal(resp.Data, &searchResp); err != nil {
-		return nil, fmt.Errorf("decode search data: %w", err)
+		return nil, nil, fmt.Errorf("decode search data: %w", err)
 	}
 
 	var works []Work
+	episodesByWork := make(map[int][]Episode)
 	for _, edge := range searchResp.SearchWorks.Edges {
 		node := edge.Node
 		w := Work{
@@ -251,86 +240,29 @@ func (c *Client) searchWorksGraphQL(title string) ([]Work, error) {
 			WatchersCount: node.WatchersCount,
 		}
 		works = append(works, w)
-	}
 
-	return works, nil
-}
-
-// GetEpisodesForGraphQLWorks returns episodes for works found via GraphQL.
-// Since GraphQL already fetched episodes, we extract them from the raw response.
-// This is used as a secondary source when the GraphQL response includes episodes.
-func (c *Client) GetEpisodesForGraphQLWorks(title string, workID int) ([]Episode, error) {
-	// Try to get episodes from a fresh GraphQL query that includes them
-	query := `query SearchWorks($titles: [String!]!) {
-  searchWorks(titles: $titles) {
-    edges {
-      node {
-        annictId
-        episodes(first: 100, orderBy: {field: SORT_NUMBER, direction: ASC}) {
-          edges {
-            node {
-              id
-              number
-              numberText
-              title
-            }
-          }
-        }
-      }
-    }
-  }
-}`
-
-	variables := map[string]interface{}{
-		"titles": []string{title},
-	}
-
-	reqBody := graphqlQuery{
-		Query:     query,
-		Variables: variables,
-	}
-
-	body, err := c.postGraphQL(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("graphql get episodes: %w", err)
-	}
-
-	var resp graphqlResponse
-	if err := json.Unmarshal(body, &resp); err != nil {
-		return nil, fmt.Errorf("decode graphql response: %w", err)
-	}
-
-	if len(resp.Errors) > 0 {
-		return nil, fmt.Errorf("graphql error: %s", resp.Errors[0].Message)
-	}
-
-	var searchResp graphqlSearchWorksResponse
-	if err := json.Unmarshal(resp.Data, &searchResp); err != nil {
-		return nil, fmt.Errorf("decode search data: %w", err)
-	}
-
-	for _, edge := range searchResp.SearchWorks.Edges {
-		if edge.Node.AnnictID == workID {
-			var episodes []Episode
-			for _, epEdge := range edge.Node.Episodes.Edges {
-				epID := 0
-				if id, err := strconv.Atoi(epEdge.Node.ID); err == nil {
-					epID = id
-				}
-				ep := Episode{
-					ID:         epID,
-					Number:     epEdge.Node.Number,
-					NumberText: epEdge.Node.NumberText,
-					Title:      epEdge.Node.Title,
-					WorkID:     workID,
-				}
-				episodes = append(episodes, ep)
-			}
-			return episodes, nil
+		if len(node.Episodes.Edges) == 0 {
+			continue
 		}
+		episodes := make([]Episode, 0, len(node.Episodes.Edges))
+		for _, epEdge := range node.Episodes.Edges {
+			epID := 0
+			if id, err := strconv.Atoi(epEdge.Node.ID); err == nil {
+				epID = id
+			}
+			episodes = append(episodes, Episode{
+				ID:         epID,
+				Number:     epEdge.Node.Number,
+				NumberText: epEdge.Node.NumberText,
+				SortNumber: epEdge.Node.SortNumber,
+				Title:      epEdge.Node.Title,
+				WorkID:     node.AnnictID,
+			})
+		}
+		episodesByWork[node.AnnictID] = episodes
 	}
 
-	return nil, fmt.Errorf("work %d not found in GraphQL response", workID)
+	return works, episodesByWork, nil
 }
 
 // searchWorksREST uses the REST API to search for works (fallback).
