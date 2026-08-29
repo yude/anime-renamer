@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -361,11 +362,11 @@ func collectFiles(target string, recursive bool) ([]string, error) {
 	exts := map[string]bool{".mp4": true, ".ts": true, ".mkv": true, ".m4v": true}
 
 	if recursive {
-		err = filepath.Walk(target, func(path string, fi os.FileInfo, err error) error {
+		err = filepath.WalkDir(target, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return nil
 			}
-			if fi.IsDir() {
+			if d.IsDir() {
 				return nil
 			}
 			ext := strings.ToLower(filepath.Ext(path))
