@@ -454,6 +454,44 @@ func TestSubtitlePartialMatch(t *testing.T) {
 	}
 }
 
+func TestFindMatchingProgram(t *testing.T) {
+	jst := time.FixedZone("JST", 9*60*60)
+	date := time.Date(2026, 8, 13, 0, 0, 0, 0, jst)
+
+	t.Run("zero episode ID must not spuriously match a program with no linked episode", func(t *testing.T) {
+		// Regression: 0 is the zero-value placeholder both for "episode ID
+		// unknown" (the query side) and "program has no linked episode"
+		// (the data side) — comparing them as if equal would match a
+		// program on a completely wrong date.
+		programs := []annict.Program{
+			{ID: 1, StartedAt: date.AddDate(0, 0, 7), Episode: annict.Episode{ID: 0}},
+		}
+		if got := findMatchingProgram(date, 0, programs); got != nil {
+			t.Errorf("findMatchingProgram() = %+v, want nil (wrong date, no real episode ID to match on)", got)
+		}
+	})
+
+	t.Run("real episode ID match still works", func(t *testing.T) {
+		programs := []annict.Program{
+			{ID: 1, StartedAt: date.AddDate(0, 0, 7), Episode: annict.Episode{ID: 42}},
+		}
+		got := findMatchingProgram(date, 42, programs)
+		if got == nil || got.ID != 1 {
+			t.Errorf("findMatchingProgram() = %+v, want program ID 1 matched by episode ID despite the wrong date", got)
+		}
+	})
+
+	t.Run("date-only match still works when episode ID is unknown", func(t *testing.T) {
+		programs := []annict.Program{
+			{ID: 1, StartedAt: date, Episode: annict.Episode{ID: 0}},
+		}
+		got := findMatchingProgram(date, 0, programs)
+		if got == nil || got.ID != 1 {
+			t.Errorf("findMatchingProgram() = %+v, want program ID 1 matched by date", got)
+		}
+	})
+}
+
 func float64Ptr(f float64) *float64 {
 	return &f
 }

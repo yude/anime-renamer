@@ -402,7 +402,12 @@ func findMatchingProgram(date time.Time, episodeID int, programs []annict.Progra
 		p := &programs[i]
 		score := 0
 
-		if p.Episode.ID == episodeID {
+		// Zero is not a real Annict ID (used as the zero-value placeholder
+		// when a program has no linked episode, or when an episode ID
+		// couldn't be determined), so treat it as "unknown" rather than a
+		// value that can match — otherwise two unrelated zero IDs would
+		// spuriously "match" each other.
+		if episodeID > 0 && p.Episode.ID == episodeID {
 			score += 10
 		}
 
