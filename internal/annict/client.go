@@ -131,7 +131,7 @@ type graphqlWorkNode struct {
 	Episodes      struct {
 		Edges []struct {
 			Node struct {
-				ID         string   `json:"id"`
+				AnnictID   int      `json:"annictId"`
 				Number     *float64 `json:"number"`
 				NumberText string   `json:"numberText"`
 				SortNumber int      `json:"sortNumber"`
@@ -179,7 +179,7 @@ func (c *Client) searchWorksGraphQL(title string) ([]Work, map[int][]Episode, er
         episodes(first: 100, orderBy: {field: SORT_NUMBER, direction: ASC}) {
           edges {
             node {
-              id
+              annictId
               number
               numberText
               sortNumber
@@ -259,7 +259,7 @@ func (c *Client) searchWorksGraphQL(title string) ([]Work, map[int][]Episode, er
 			AnnictID:      node.AnnictID,
 			Title:         node.Title,
 			TitleKana:     node.TitleKana,
-			SeasonName:    node.SeasonName,
+			SeasonName:    graphqlSeason(node.SeasonYear, node.SeasonName),
 			EpisodesCount: node.EpisodesCount,
 			WatchersCount: node.WatchersCount,
 		}
@@ -270,12 +270,8 @@ func (c *Client) searchWorksGraphQL(title string) ([]Work, map[int][]Episode, er
 		}
 		episodes := make([]Episode, 0, len(node.Episodes.Edges))
 		for _, epEdge := range node.Episodes.Edges {
-			epID := 0
-			if id, err := strconv.Atoi(epEdge.Node.ID); err == nil {
-				epID = id
-			}
 			episodes = append(episodes, Episode{
-				ID:         epID,
+				ID:         epEdge.Node.AnnictID,
 				Number:     epEdge.Node.Number,
 				NumberText: epEdge.Node.NumberText,
 				SortNumber: epEdge.Node.SortNumber,
@@ -287,6 +283,16 @@ func (c *Client) searchWorksGraphQL(title string) ([]Work, map[int][]Episode, er
 	}
 
 	return works, episodesByWork, nil
+}
+
+// graphqlSeason converts GraphQL's separate year and enum fields (for
+// example 2026 and "SUMMER") to the same "2026-summer" representation
+// returned by the REST API and consumed by the matcher.
+func graphqlSeason(year int, name string) string {
+	if year <= 0 || name == "" {
+		return ""
+	}
+	return fmt.Sprintf("%d-%s", year, strings.ToLower(name))
 }
 
 // searchWorksREST uses the REST API to search for works (fallback).

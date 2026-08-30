@@ -18,9 +18,9 @@ func TestMonthToSeasonAndSeasonYear(t *testing.T) {
 		wantSeason string
 		wantYear   int // for a 2026 date
 	}{
-		{time.January, "winter", 2025},
-		{time.February, "winter", 2025},
-		{time.March, "winter", 2025},
+		{time.January, "winter", 2026},
+		{time.February, "winter", 2026},
+		{time.March, "winter", 2026},
 		{time.April, "spring", 2026},
 		{time.May, "spring", 2026},
 		{time.June, "spring", 2026},
@@ -49,6 +49,26 @@ func TestMonthToSeasonAndSeasonYear(t *testing.T) {
 				t.Errorf("SeasonYearFromMonth(%s 2026) = %d, want %d", tt.month, got, tt.wantYear)
 			}
 		})
+	}
+}
+
+func TestSeasonNarrowingForWinterUsesSameCalendarYear(t *testing.T) {
+	works := []annict.Work{
+		{ID: 1, Title: "作品", SeasonName: "2026-winter"},
+		{ID: 2, Title: "作品", SeasonName: "2025-winter"},
+	}
+	meta := &parser.RecordingMetadata{
+		WorkTitle:     "作品",
+		EpisodeNumber: 2,
+		RecordedDate:  time.Date(2026, 1, 15, 0, 0, 0, 0, time.FixedZone("JST", 9*60*60)),
+	}
+	episodesByWork := map[int][]annict.Episode{
+		1: {{ID: 101, Number: float64Ptr(2), Title: "ep2"}},
+	}
+
+	result := Match(meta, works, episodesByWork, nil)
+	if result == nil || result.Work == nil || result.Work.ID != 1 {
+		t.Fatalf("Match() = %+v, want 2026-winter work ID 1", result)
 	}
 }
 

@@ -79,9 +79,9 @@ func TestSearchWorks_GraphQLReturnsEmbeddedEpisodes(t *testing.T) {
 	graphql := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[
-			{"node":{"annictId":1,"title":"作品","episodesCount":2,"episodes":{"edges":[
-				{"node":{"id":"101","number":1,"sortNumber":1,"title":"第一話"}},
-				{"node":{"id":"102","number":2,"sortNumber":2,"title":"第二話"}}
+			{"node":{"annictId":1,"title":"作品","seasonName":"SUMMER","seasonYear":2026,"episodesCount":2,"episodes":{"edges":[
+				{"node":{"id":"opaque-graphql-id","annictId":101,"number":1,"sortNumber":1,"title":"第一話"}},
+				{"node":{"id":"another-opaque-id","annictId":102,"number":2,"sortNumber":2,"title":"第二話"}}
 			]}}}
 		]}}}`)
 	}))
@@ -98,6 +98,9 @@ func TestSearchWorks_GraphQLReturnsEmbeddedEpisodes(t *testing.T) {
 	if len(works) != 1 {
 		t.Fatalf("SearchWorks() = %+v, want 1 work", works)
 	}
+	if works[0].SeasonName != "2026-summer" {
+		t.Errorf("works[0].SeasonName = %q, want %q", works[0].SeasonName, "2026-summer")
+	}
 
 	episodes, ok := episodesByWork[1]
 	if !ok {
@@ -108,6 +111,25 @@ func TestSearchWorks_GraphQLReturnsEmbeddedEpisodes(t *testing.T) {
 	}
 	if episodes[0].ID != 101 || episodes[0].Number == nil || int(*episodes[0].Number) != 1 || episodes[0].SortNumber != 1 || episodes[0].Title != "第一話" || episodes[0].WorkID != 1 {
 		t.Errorf("episodes[0] = %+v, unexpected field values", episodes[0])
+	}
+}
+
+func TestGraphQLSeason(t *testing.T) {
+	tests := []struct {
+		year int
+		name string
+		want string
+	}{
+		{year: 2026, name: "WINTER", want: "2026-winter"},
+		{year: 2026, name: "summer", want: "2026-summer"},
+		{year: 0, name: "WINTER", want: ""},
+		{year: 2026, name: "", want: ""},
+	}
+
+	for _, tt := range tests {
+		if got := graphqlSeason(tt.year, tt.name); got != tt.want {
+			t.Errorf("graphqlSeason(%d, %q) = %q, want %q", tt.year, tt.name, got, tt.want)
+		}
 	}
 }
 

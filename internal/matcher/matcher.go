@@ -42,14 +42,10 @@ func monthToSeason(month time.Month) string {
 	}
 }
 
-// SeasonYearFromMonth returns the season year for a given date.
-// For Jan-Mar, the season year is the previous year (winter season starts in Jan of the broadcast year).
+// SeasonYearFromMonth returns the Annict season year for a given date. Annict
+// labels each January-March cour as winter of that same calendar year.
 func SeasonYearFromMonth(t time.Time) int {
-	year := t.Year()
-	if t.Month() <= 3 {
-		year--
-	}
-	return year
+	return t.Year()
 }
 
 // Match attempts to match parsed metadata against Annict data.
