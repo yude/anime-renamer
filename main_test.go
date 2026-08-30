@@ -167,48 +167,6 @@ func TestEpisodesComplete(t *testing.T) {
 	}
 }
 
-func TestResolveConfidenceThreshold(t *testing.T) {
-	tests := []struct {
-		name          string
-		explicitValue int
-		explicitlySet bool
-		dryRun        bool
-		want          int
-	}{
-		{
-			name: "normal run, no explicit flag, uses AutoRenameThreshold",
-			want: matcher.AutoRenameThreshold,
-		},
-		{
-			name:   "dry-run, no explicit flag, uses the more lenient DryRunThreshold",
-			dryRun: true,
-			want:   matcher.DryRunThreshold,
-		},
-		{
-			name:          "explicit --confidence always wins, even under --dry-run",
-			explicitValue: 55,
-			explicitlySet: true,
-			dryRun:        true,
-			want:          55,
-		},
-		{
-			name:          "explicit --confidence wins in a normal run too",
-			explicitValue: 99,
-			explicitlySet: true,
-			want:          99,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := resolveConfidenceThreshold(tt.explicitValue, tt.explicitlySet, tt.dryRun); got != tt.want {
-				t.Errorf("resolveConfidenceThreshold(%d, %v, %v) = %d, want %d",
-					tt.explicitValue, tt.explicitlySet, tt.dryRun, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestGetProgramsCachesPerDateNotJustPerWork(t *testing.T) {
 	// Regression test: a shared programsCache keyed only by workID would
 	// let the second file's query for the same work silently reuse the

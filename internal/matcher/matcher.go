@@ -24,7 +24,6 @@ type MatchResult struct {
 // Confidence thresholds
 const (
 	AutoRenameThreshold = 90
-	DryRunThreshold     = 70
 )
 
 // Season mapping from month to Annict season name. Each season is exactly

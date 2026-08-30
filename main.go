@@ -23,7 +23,7 @@ func main() {
 	recursive := flag.Bool("recursive", false, "Process subdirectories recursively")
 	verbose := flag.Bool("verbose", false, "Show detailed output")
 	noCache := flag.Bool("no-cache", false, "Disable caching")
-	confidenceThreshold := flag.Int("confidence", matcher.AutoRenameThreshold, "Minimum confidence for auto-rename (lower default in --dry-run mode)")
+	confidenceThreshold := flag.Int("confidence", matcher.AutoRenameThreshold, "Minimum confidence for auto-rename")
 	outputDir := flag.String("output", "", "Output directory (default: same as input)")
 
 	flag.Usage = func() {
@@ -45,14 +45,6 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
-
-	confidenceExplicit := false
-	flag.Visit(func(f *flag.Flag) {
-		if f.Name == "confidence" {
-			confidenceExplicit = true
-		}
-	})
-	effectiveConfidence := resolveConfidenceThreshold(*confidenceThreshold, confidenceExplicit, *dryRun)
 
 	// Get access token
 	token := os.Getenv("ANNICT_ACCESS_TOKEN")
@@ -101,7 +93,7 @@ func main() {
 	failed := 0
 
 	for _, file := range files {
-		result := processFile(file, annictClient, c, workCache, episodesCache, programsCache, *dryRun, *verbose, effectiveConfidence, *outputDir)
+		result := processFile(file, annictClient, c, workCache, episodesCache, programsCache, *dryRun, *verbose, *confidenceThreshold, *outputDir)
 
 		switch {
 		case result.Error != nil:
@@ -317,22 +309,6 @@ func searchWork(client *annict.Client, c *cache.Cache, title string, wc map[stri
 // it's safe to use directly instead of falling back to a full REST fetch.
 func episodesComplete(w annict.Work, episodes []annict.Episode) bool {
 	return w.EpisodesCount > 0 && len(episodes) >= w.EpisodesCount
-}
-
-// resolveConfidenceThreshold returns the effective confidence threshold: the
-// user's explicit --confidence value if they gave one, otherwise
-// matcher.AutoRenameThreshold normally or the more lenient
-// matcher.DryRunThreshold under --dry-run, so a preview surfaces borderline
-// candidates for review instead of silently filtering them out — nothing
-// is actually renamed in dry-run mode regardless.
-func resolveConfidenceThreshold(explicitValue int, explicitlySet, dryRun bool) int {
-	if explicitlySet {
-		return explicitValue
-	}
-	if dryRun {
-		return matcher.DryRunThreshold
-	}
-	return matcher.AutoRenameThreshold
 }
 
 func getEpisodes(client *annict.Client, c *cache.Cache, workID int, ec map[int][]annict.Episode) ([]annict.Episode, error) {
