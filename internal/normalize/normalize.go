@@ -45,6 +45,23 @@ func NormalizeForSearch(s string) string {
 	return CollapseSpaces(strings.TrimSpace(Normalize(b.String())))
 }
 
+// NormalizeSubtitleForMatch normalizes episode subtitles while ignoring
+// presentation-only differences commonly introduced by EPG providers:
+// kana-only readings in parentheses and whitespace.
+//
+// Parenthetical text containing kanji, Latin letters, or digits is preserved,
+// so meaningful qualifiers such as "(前編)" are not silently discarded.
+func NormalizeSubtitleForMatch(s string) string {
+	s = stripKanaReadingParentheses(s)
+	s = NormalizeForSearch(s)
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 // Compare compares two strings after normalization.
 func Compare(a, b string) bool {
 	return Normalize(a) == Normalize(b)
@@ -213,4 +230,63 @@ func stripBracketContent(s string, open, close rune) string {
 		result = result[:start] + " " + rest[end+len(closeStr):]
 	}
 	return strings.TrimSpace(result)
+}
+
+// stripKanaReadingParentheses removes parenthetical kana readings embedded in
+// a subtitle. A parenthesized-only subtitle is left intact: reading aids need
+// a base expression immediately before the opening parenthesis.
+func stripKanaReadingParentheses(s string) string {
+	runes := []rune(s)
+	var b strings.Builder
+
+	for i := 0; i < len(runes); {
+		if runes[i] != '(' && runes[i] != '（' {
+			b.WriteRune(runes[i])
+			i++
+			continue
+		}
+
+		close := ')'
+		if runes[i] == '（' {
+			close = '）'
+		}
+		end := i + 1
+		for end < len(runes) && runes[end] != close {
+			end++
+		}
+
+		if end < len(runes) && hasReadingBase(runes, i) && isKanaReading(runes[i+1:end]) {
+			i = end + 1
+			continue
+		}
+
+		b.WriteRune(runes[i])
+		i++
+	}
+
+	return b.String()
+}
+
+func hasReadingBase(runes []rune, openingIndex int) bool {
+	if openingIndex == 0 {
+		return false
+	}
+	previous := runes[openingIndex-1]
+	return unicode.IsLetter(previous) || unicode.IsDigit(previous)
+}
+
+func isKanaReading(runes []rune) bool {
+	hasKana := false
+	for _, r := range runes {
+		switch {
+		case unicode.In(r, unicode.Hiragana, unicode.Katakana):
+			hasKana = true
+		case r == 'ー' || r == '・' || r == '･' || unicode.IsSpace(r):
+			// Prolonged sound marks, middle dots, and spaces are allowed in a
+			// kana reading, but do not make an empty annotation a reading.
+		default:
+			return false
+		}
+	}
+	return hasKana
 }

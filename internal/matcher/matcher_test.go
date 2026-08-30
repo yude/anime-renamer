@@ -454,6 +454,71 @@ func TestSubtitlePartialMatch(t *testing.T) {
 	}
 }
 
+func TestMatchSubtitleWithParentheticalReadingAid(t *testing.T) {
+	tests := []struct {
+		name         string
+		episodeTitle string
+		fileSubtitle string
+	}{
+		{
+			name:         "katakana reading omitted from filename",
+			episodeTitle: "開幕！裏超闘球(スーパードッジ)大会！",
+			fileSubtitle: "開幕!裏超闘球大会!",
+		},
+		{
+			name:         "hiragana reading omitted and spaces added",
+			episodeTitle: "超常対決！巨人vs(たい)巨人！",
+			fileSubtitle: "超常対決!巨人 vs 巨人!",
+		},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			workID := i + 1
+			works := []annict.Work{{ID: workID, Title: "炎の闘球女 ドッジ弾子"}}
+			episodesByWork := map[int][]annict.Episode{
+				workID: {{ID: 100 + workID, Number: float64Ptr(float64(7 + i)), Title: tt.episodeTitle}},
+			}
+			meta := &parser.RecordingMetadata{
+				WorkTitle:     "炎の闘球女 ドッジ弾子",
+				EpisodeNumber: 7 + i,
+				Subtitle:      tt.fileSubtitle,
+			}
+
+			result := Match(meta, works, episodesByWork, nil)
+			if result == nil {
+				t.Fatal("Match returned nil")
+			}
+			if result.Confidence < AutoRenameThreshold {
+				t.Errorf("Confidence = %d, want >= %d (reasons: %v)", result.Confidence, AutoRenameThreshold, result.Reasons)
+			}
+			if result.Episode == nil {
+				t.Fatalf("Episode is nil (reasons: %v)", result.Reasons)
+			}
+		})
+	}
+}
+
+func TestMatchSubtitleDoesNotDropMeaningfulParentheticalQualifier(t *testing.T) {
+	works := []annict.Work{{ID: 1, Title: "作品"}}
+	episodesByWork := map[int][]annict.Episode{
+		1: {{ID: 101, Number: float64Ptr(1), Title: "決戦（前編）"}},
+	}
+	meta := &parser.RecordingMetadata{
+		WorkTitle:     "作品",
+		EpisodeNumber: 1,
+		Subtitle:      "決戦",
+	}
+
+	result := Match(meta, works, episodesByWork, nil)
+	if result == nil {
+		t.Fatal("Match returned nil")
+	}
+	if result.Confidence >= AutoRenameThreshold {
+		t.Errorf("Confidence = %d, want < %d because a meaningful qualifier differs (reasons: %v)", result.Confidence, AutoRenameThreshold, result.Reasons)
+	}
+}
+
 func TestFindMatchingProgram(t *testing.T) {
 	jst := time.FixedZone("JST", 9*60*60)
 	date := time.Date(2026, 8, 13, 0, 0, 0, 0, jst)

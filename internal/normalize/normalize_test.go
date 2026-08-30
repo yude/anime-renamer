@@ -64,6 +64,53 @@ func TestNormalizeForSearch(t *testing.T) {
 	}
 }
 
+func TestNormalizeSubtitleForMatch(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "katakana reading aid",
+			input:    "開幕！裏超闘球(スーパードッジ)大会！",
+			expected: "開幕!裏超闘球大会!",
+		},
+		{
+			name:     "hiragana reading aid and spaces",
+			input:    "超常対決！巨人vs(たい)巨人！",
+			expected: "超常対決!巨人vs巨人!",
+		},
+		{
+			name:     "spaces around ASCII word",
+			input:    "超常対決!巨人 vs 巨人!",
+			expected: "超常対決!巨人vs巨人!",
+		},
+		{
+			name:     "meaningful kanji qualifier is preserved",
+			input:    "決戦（前編）",
+			expected: "決戦前編",
+		},
+		{
+			name:     "parenthesized-only subtitle is preserved",
+			input:    "（つづく）",
+			expected: "つづく",
+		},
+		{
+			name:     "spaced parenthetical text is preserved",
+			input:    "決戦 （つづく）",
+			expected: "決戦つづく",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := NormalizeSubtitleForMatch(tt.input); got != tt.expected {
+				t.Errorf("NormalizeSubtitleForMatch(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestCollapseSpaces(t *testing.T) {
 	tests := []struct {
 		input    string

@@ -182,6 +182,9 @@ func Match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 			} else if normalize.Compare(episode.Title, meta.Subtitle) {
 				result.Confidence += 20
 				result.Reasons = append(result.Reasons, "subtitle exact match")
+			} else if subtitlesEquivalent(episode.Title, meta.Subtitle) {
+				result.Confidence += 20
+				result.Reasons = append(result.Reasons, fmt.Sprintf("subtitle normalized match: annict=%q, file=%q", episode.Title, meta.Subtitle))
 			} else if subtitlePartialMatch(episode.Title, meta.Subtitle) {
 				result.Confidence += 10
 				result.Reasons = append(result.Reasons, fmt.Sprintf("subtitle partial match: annict=%q, file=%q", episode.Title, meta.Subtitle))
@@ -372,7 +375,7 @@ func findMatchingEpisode(number int, subtitle string, episodes []annict.Episode)
 			if numberMatch == nil {
 				numberMatch = e
 			}
-			if subtitle != "" && e.Title != "" && normalize.NormalizeForSearch(e.Title) == normalize.NormalizeForSearch(subtitle) {
+			if subtitle != "" && e.Title != "" && subtitlesEquivalent(e.Title, subtitle) {
 				if numberAndSubtitleMatch == nil {
 					numberAndSubtitleMatch = e
 				}
@@ -451,6 +454,12 @@ func subtitlePartialMatch(a, b string) bool {
 		}
 	}
 	return false
+}
+
+func subtitlesEquivalent(a, b string) bool {
+	na := normalize.NormalizeSubtitleForMatch(a)
+	nb := normalize.NormalizeSubtitleForMatch(b)
+	return na != "" && nb != "" && na == nb
 }
 
 // contains checks if s contains substr.
