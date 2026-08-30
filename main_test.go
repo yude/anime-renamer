@@ -1,9 +1,13 @@
 package main
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/yude/anime-renamer/internal/annict"
 	"github.com/yude/anime-renamer/internal/matcher"
@@ -199,5 +203,47 @@ func TestResolveConfidenceThreshold(t *testing.T) {
 					tt.explicitValue, tt.explicitlySet, tt.dryRun, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestGetProgramsCachesPerDateNotJustPerWork(t *testing.T) {
+	// Regression test: a shared programsCache keyed only by workID would
+	// let the second file's query for the same work silently reuse the
+	// first file's program list, even though the two files have entirely
+	// different recorded dates and therefore different (since, until)
+	// windows — breaking findMatchingProgram's date-based matching for
+	// every file after the first one of a given work in a batch.
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"programs":[{"id":%d,"started_at":"2026-08-01T00:00:00+09:00"}]}`, requestCount)
+	}))
+	defer server.Close()
+
+	client := annict.NewClientWithBaseURL("token", server.URL)
+	pc := make(map[programsCacheKey][]annict.Program)
+
+	jst := time.FixedZone("JST", 9*60*60)
+	date1 := time.Date(2026, 8, 1, 0, 0, 0, 0, jst)
+	date2 := time.Date(2026, 8, 8, 0, 0, 0, 0, jst)
+	workID := 1
+
+	if _, err := getPrograms(client, workID, date1, pc); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := getPrograms(client, workID, date2, pc); err != nil {
+		t.Fatal(err)
+	}
+	if requestCount != 2 {
+		t.Errorf("requests = %d, want 2 (one per distinct date for the same work)", requestCount)
+	}
+
+	// Re-fetching an already-seen (workID, date) pair must hit the cache.
+	if _, err := getPrograms(client, workID, date1, pc); err != nil {
+		t.Fatal(err)
+	}
+	if requestCount != 2 {
+		t.Errorf("requests = %d after re-fetching a cached (workID, date), want still 2", requestCount)
 	}
 }

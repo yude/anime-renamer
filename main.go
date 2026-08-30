@@ -94,7 +94,7 @@ func main() {
 	// Process each file
 	workCache := make(map[string][]annict.Work)
 	episodesCache := make(map[int][]annict.Episode)
-	programsCache := make(map[int][]annict.Program)
+	programsCache := make(map[programsCacheKey][]annict.Program)
 
 	renamed := 0
 	skipped := 0
@@ -130,7 +130,7 @@ func processFile(
 	c *cache.Cache,
 	workCache map[string][]annict.Work,
 	episodesCache map[int][]annict.Episode,
-	programsCache map[int][]annict.Program,
+	programsCache map[programsCacheKey][]annict.Program,
 	dryRun, verbose bool,
 	confidenceThreshold int,
 	outputDir string,
@@ -182,29 +182,31 @@ func processFile(
 		}
 	}
 
-	// Step 4: Get programs for each candidate work
+	// Step 4: Get programs for each candidate work. programsByWork is
+	// built fresh per file (unlike workCache/episodesCache, which are
+	// safe to accumulate across the whole run): a work's programs that
+	// matter depend on *this file's* recorded date, so reusing another
+	// file's result here would feed Match() programs from the wrong date
+	// range entirely.
+	programsByWork := make(map[int][]annict.Program)
 	if !meta.RecordedDate.IsZero() {
 		for _, w := range works {
-			if _, ok := programsCache[w.ID]; !ok {
-				since := meta.RecordedDate.AddDate(0, 0, -1)
-				until := meta.RecordedDate.AddDate(0, 0, 2)
-				programs, err := getPrograms(client, c, w.ID, since, until, programsCache)
-				if err != nil {
-					if verbose {
-						fmt.Fprintf(os.Stderr, "  Warning: could not get programs for %s: %v\n", w.Title, err)
-					}
-					continue
-				}
-				programsCache[w.ID] = programs
+			programs, err := getPrograms(client, w.ID, meta.RecordedDate, programsCache)
+			if err != nil {
 				if verbose {
-					fmt.Fprintf(os.Stderr, "  Programs: %d for %q\n", len(programs), w.Title)
+					fmt.Fprintf(os.Stderr, "  Warning: could not get programs for %s: %v\n", w.Title, err)
 				}
+				continue
+			}
+			programsByWork[w.ID] = programs
+			if verbose {
+				fmt.Fprintf(os.Stderr, "  Programs: %d for %q\n", len(programs), w.Title)
 			}
 		}
 	}
 
 	// Step 5: Match
-	result := matcher.Match(meta, works, episodesCache, programsCache)
+	result := matcher.Match(meta, works, episodesCache, programsByWork)
 	if result == nil {
 		return &renamer.RenameResult{
 			OriginalPath: file,
@@ -356,19 +358,31 @@ func getEpisodes(client *annict.Client, c *cache.Cache, workID int, ec map[int][
 	return episodes, nil
 }
 
-func getPrograms(client *annict.Client, c *cache.Cache, workID int, since, until time.Time, pc map[int][]annict.Program) ([]annict.Program, error) {
-	// Check in-memory cache
-	if progs, ok := pc[workID]; ok {
+// programsCacheKey caches a work's programs per recorded date, not just per
+// work ID: the fetched window (date-1day .. date+2days) depends entirely on
+// the date, so two files for the same work on different dates must not
+// share a cache entry — see getPrograms.
+type programsCacheKey struct {
+	WorkID int
+	Date   string // date formatted as 2006-01-02
+}
+
+func getPrograms(client *annict.Client, workID int, date time.Time, pc map[programsCacheKey][]annict.Program) ([]annict.Program, error) {
+	key := programsCacheKey{WorkID: workID, Date: date.Format("2006-01-02")}
+
+	// Check in-memory cache (programs are date-sensitive, not cached to disk)
+	if progs, ok := pc[key]; ok {
 		return progs, nil
 	}
 
-	// Fetch from API (programs are date-sensitive, don't cache long-term)
+	since := date.AddDate(0, 0, -1)
+	until := date.AddDate(0, 0, 2)
 	programs, err := client.GetPrograms(workID, since, until)
 	if err != nil {
 		return nil, err
 	}
 
-	pc[workID] = programs
+	pc[key] = programs
 	return programs, nil
 }
 
