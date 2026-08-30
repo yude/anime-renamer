@@ -68,12 +68,19 @@ func BuildPath(originalPath string, result *matcher.MatchResult) (string, error)
 	}
 	subtitle = pathSanitizer.Replace(subtitle)
 
-	// Format filename: <WorkTitle> #<N> 「<Subtitle>」.mp4
+	// Renaming does not transcode the recording, so preserve its container
+	// extension. Keep the historical .mp4 fallback for extensionless paths.
+	ext := filepath.Ext(originalPath)
+	if ext == "" {
+		ext = ".mp4"
+	}
+
+	// Format filename: <WorkTitle> #<N> 「<Subtitle>」<original extension>
 	var filename string
 	if subtitle != "" {
-		filename = fmt.Sprintf("%s #%d 「%s」.mp4", workTitle, epNum, subtitle)
+		filename = fmt.Sprintf("%s #%d 「%s」%s", workTitle, epNum, subtitle, ext)
 	} else {
-		filename = fmt.Sprintf("%s #%d.mp4", workTitle, epNum)
+		filename = fmt.Sprintf("%s #%d%s", workTitle, epNum, ext)
 	}
 
 	return filepath.Join(workDir, filename), nil

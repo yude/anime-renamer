@@ -40,6 +40,24 @@ func TestBuildPath(t *testing.T) {
 			wantPath: "/recordings/作品/作品 #10 「テスト」.mp4",
 		},
 		{
+			name:         "preserve transport stream extension",
+			originalPath: "/recordings/作品 ep.7「テスト」 (20260801).ts",
+			match: &matcher.MatchResult{
+				Work:    &annict.Work{ID: 1, Title: "作品"},
+				Episode: &annict.Episode{ID: 1, Number: float64Ptr(7), Title: "テスト"},
+			},
+			wantPath: "/recordings/作品/作品 #7 「テスト」.ts",
+		},
+		{
+			name:         "preserve uppercase extension",
+			originalPath: "/recordings/作品 ep.7「テスト」 (20260801).MKV",
+			match: &matcher.MatchResult{
+				Work:    &annict.Work{ID: 1, Title: "作品"},
+				Episode: &annict.Episode{ID: 1, Number: float64Ptr(7), Title: "テスト"},
+			},
+			wantPath: "/recordings/作品/作品 #7 「テスト」.MKV",
+		},
+		{
 			name:         "no subtitle",
 			originalPath: "/recordings/作品 ep.1 (20260801).mp4",
 			match: &matcher.MatchResult{
