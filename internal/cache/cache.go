@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -62,12 +63,30 @@ func (c *Cache) GetWork(title string) (*annict.Work, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	path := filepath.Join(c.dir, "works.json")
+	path := c.workPath(title)
 	data, err := os.ReadFile(path)
-	if err != nil {
+	if err == nil {
+		var entry cacheEntry[annict.Work]
+		if err := json.Unmarshal(data, &entry); err != nil {
+			return nil, false
+		}
+		if time.Since(entry.CachedAt) > c.ttl {
+			return nil, false
+		}
+		return &entry.Data, true
+	}
+	if !os.IsNotExist(err) {
 		return nil, false
 	}
 
+	// Read the pre-v1.1 shared cache format for compatibility. New writes
+	// use one file per title to avoid repeatedly decoding and rewriting an
+	// ever-growing map and to prevent separate processes losing each
+	// other's updates.
+	data, err = os.ReadFile(filepath.Join(c.dir, "works.json"))
+	if err != nil {
+		return nil, false
+	}
 	var entries map[string]cacheEntry[annict.Work]
 	if err := json.Unmarshal(data, &entries); err != nil {
 		return nil, false
@@ -94,29 +113,20 @@ func (c *Cache) SetWork(title string, work *annict.Work) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if err := os.MkdirAll(c.dir, 0o755); err != nil {
-		return fmt.Errorf("create cache dir: %w", err)
+	if work == nil {
+		return fmt.Errorf("cache work: nil work")
 	}
 
-	path := filepath.Join(c.dir, "works.json")
-	entries := make(map[string]cacheEntry[annict.Work])
-
-	data, err := os.ReadFile(path)
-	if err == nil {
-		_ = json.Unmarshal(data, &entries)
-	}
-
-	entries[title] = cacheEntry[annict.Work]{
+	entry := cacheEntry[annict.Work]{
 		Data:     *work,
 		CachedAt: time.Now(),
 	}
+	return writeJSONAtomic(c.workPath(title), entry)
+}
 
-	data, err = json.MarshalIndent(entries, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal cache: %w", err)
-	}
-
-	return os.WriteFile(path, data, 0o644)
+func (c *Cache) workPath(title string) string {
+	hash := sha256.Sum256([]byte(title))
+	return filepath.Join(c.dir, fmt.Sprintf("work_%x.json", hash))
 }
 
 // GetEpisodes retrieves cached episodes for a work ID.
@@ -155,25 +165,60 @@ func (c *Cache) SetEpisodes(workID int, episodes []annict.Episode) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if err := os.MkdirAll(c.dir, 0o755); err != nil {
-		return fmt.Errorf("create cache dir: %w", err)
-	}
-
 	path := filepath.Join(c.dir, fmt.Sprintf("episodes_%d.json", workID))
 	entry := cacheEntry[[]annict.Episode]{
 		Data:     episodes,
 		CachedAt: time.Now(),
 	}
 
-	data, err := json.MarshalIndent(entry, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal cache: %w", err)
-	}
-
-	return os.WriteFile(path, data, 0o644)
+	return writeJSONAtomic(path, entry)
 }
 
 // Clear removes all cached files.
 func (c *Cache) Clear() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	return os.RemoveAll(c.dir)
+}
+
+// writeJSONAtomic writes a complete cache entry to a unique temporary file
+// and then replaces the destination. Readers therefore see either the old
+// complete JSON or the new complete JSON, never a partially written file.
+func writeJSONAtomic(path string, value any) (err error) {
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal cache: %w", err)
+	}
+
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create cache dir: %w", err)
+	}
+
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create cache temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		tmp.Close()
+		os.Remove(tmpPath)
+	}()
+
+	if err := tmp.Chmod(0o644); err != nil {
+		return fmt.Errorf("set cache temp mode: %w", err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		return fmt.Errorf("write cache temp file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("sync cache temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close cache temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("replace cache file: %w", err)
+	}
+	return nil
 }

@@ -1,8 +1,10 @@
 package cache
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -10,7 +12,8 @@ import (
 )
 
 func TestWorkRoundTrip(t *testing.T) {
-	c := New(t.TempDir())
+	dir := t.TempDir()
+	c := New(dir)
 
 	if _, ok := c.GetWork("作品"); ok {
 		t.Fatal("GetWork() on empty cache should miss")
@@ -27,6 +30,73 @@ func TestWorkRoundTrip(t *testing.T) {
 	}
 	if got.ID != work.ID || got.Title != work.Title {
 		t.Errorf("GetWork() = %+v, want %+v", got, work)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "works.json")); !os.IsNotExist(err) {
+		t.Error("SetWork() should not create the legacy shared works.json cache")
+	}
+}
+
+func TestWorkReadsLegacySharedCache(t *testing.T) {
+	dir := t.TempDir()
+	cachedAt := time.Now()
+	legacy := fmt.Sprintf(`{"作品":{"data":{"id":1,"title":"作品"},"cached_at":%q}}`, cachedAt.Format(time.RFC3339Nano))
+	if err := os.WriteFile(filepath.Join(dir, "works.json"), []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := New(dir).GetWork("作品")
+	if !ok || got.ID != 1 || got.Title != "作品" {
+		t.Errorf("GetWork() legacy result = %+v, %v; want work ID 1", got, ok)
+	}
+}
+
+func TestConcurrentCacheInstancesDoNotLoseWorks(t *testing.T) {
+	dir := t.TempDir()
+	const count = 32
+	var wg sync.WaitGroup
+	errs := make(chan error, count)
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			title := fmt.Sprintf("作品%d", i)
+			err := New(dir).SetWork(title, &annict.Work{ID: i + 1, Title: title})
+			errs <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("SetWork() error = %v", err)
+		}
+	}
+
+	c := New(dir)
+	for i := 0; i < count; i++ {
+		title := fmt.Sprintf("作品%d", i)
+		got, ok := c.GetWork(title)
+		if !ok || got.ID != i+1 {
+			t.Errorf("GetWork(%q) = %+v, %v; want ID %d", title, got, ok, i+1)
+		}
+	}
+}
+
+func TestAtomicWritesLeaveNoTempFiles(t *testing.T) {
+	dir := t.TempDir()
+	c := New(dir)
+	if err := c.SetWork("作品", &annict.Work{ID: 1, Title: "作品"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SetEpisodes(1, []annict.Episode{{ID: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	leftovers, err := filepath.Glob(filepath.Join(dir, ".*.tmp-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(leftovers) != 0 {
+		t.Errorf("atomic cache writes left temp files: %v", leftovers)
 	}
 }
 
