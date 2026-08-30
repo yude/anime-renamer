@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/yude/anime-renamer/internal/annict"
 	"github.com/yude/anime-renamer/internal/matcher"
+	"github.com/yude/anime-renamer/internal/parser"
+	"github.com/yude/anime-renamer/internal/renamer"
 )
 
 func writeEnvFile(t *testing.T, dir, token string) {
@@ -245,5 +248,56 @@ func TestGetProgramsCachesPerDateNotJustPerWork(t *testing.T) {
 	}
 	if requestCount != 2 {
 		t.Errorf("requests = %d after re-fetching a cached (workID, date), want still 2", requestCount)
+	}
+}
+
+func loadFixtureJSON[T any](t *testing.T, path string) T {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read fixture %s: %v", path, err)
+	}
+	var result T
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("unmarshal fixture %s: %v", path, err)
+	}
+	return result
+}
+
+// TestEndToEndPipeline runs a realistic recording filename through the
+// actual parser -> matcher -> renamer pipeline (unlike the matcher
+// package's own tests, which hand-construct RecordingMetadata rather than
+// parsing it), guarding against a parser change silently breaking matching
+// even though each package's own unit tests still pass in isolation.
+func TestEndToEndPipeline(t *testing.T) {
+	filename := "花ざかりの君たちへ 第2期 ep．7「ずっとそばにいたいから」 (20260813).mp4"
+
+	meta, err := parser.ParseFilename(filename)
+	if err != nil {
+		t.Fatalf("ParseFilename() error = %v", err)
+	}
+
+	workResp := loadFixtureJSON[annict.WorksResponse](t, "testdata/hanakimi-work.json")
+	epResp := loadFixtureJSON[annict.EpisodesResponse](t, "testdata/hanakimi-episodes.json")
+	progResp := loadFixtureJSON[annict.ProgramsResponse](t, "testdata/hanakimi-programs.json")
+
+	episodesByWork := map[int][]annict.Episode{4168: epResp.Episodes}
+	programsByWork := map[int][]annict.Program{4168: progResp.Programs}
+
+	result := matcher.Match(meta, workResp.Works, episodesByWork, programsByWork)
+	if result == nil {
+		t.Fatal("Match returned nil")
+	}
+	if result.Confidence < matcher.AutoRenameThreshold {
+		t.Fatalf("Confidence = %d, want >= %d (reasons: %v)", result.Confidence, matcher.AutoRenameThreshold, result.Reasons)
+	}
+
+	newPath, err := renamer.BuildPath("/recordings/"+filename, result)
+	if err != nil {
+		t.Fatalf("BuildPath() error = %v", err)
+	}
+	wantPath := "/recordings/花ざかりの君たちへ 第2期/花ざかりの君たちへ 第2期 #7 「ずっとそばにいたいから」.mp4"
+	if newPath != wantPath {
+		t.Errorf("BuildPath() = %q, want %q", newPath, wantPath)
 	}
 }
