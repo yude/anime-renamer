@@ -1,6 +1,7 @@
 package renamer
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -129,9 +130,14 @@ func Rename(originalPath string, result *matcher.MatchResult, dryRun bool, outpu
 		return r
 	}
 
-	// Check destination exists
-	if _, err := os.Stat(newPath); err == nil {
+	// Check destination exists. Lstat also catches dangling symlinks, which
+	// Stat reports as missing even though replacing them would overwrite a
+	// directory entry the user already owns.
+	if _, err := os.Lstat(newPath); err == nil {
 		r.Error = fmt.Errorf("destination already exists: %s", newPath)
+		return r
+	} else if !errors.Is(err, os.ErrNotExist) {
+		r.Error = fmt.Errorf("check destination %s: %w", newPath, err)
 		return r
 	}
 
@@ -157,13 +163,18 @@ func Rename(originalPath string, result *matcher.MatchResult, dryRun bool, outpu
 	return r
 }
 
-// moveFile moves src to dst, falling back to a copy-then-remove when
-// os.Rename fails (as it always does across filesystem/device boundaries,
-// e.g. "invalid cross-device link") — relevant since --output can point
-// anywhere, not just a subdirectory of the source.
+// moveFile moves src to dst without ever replacing an existing destination.
+// A hard link makes the common same-filesystem path atomic and O(1). If links
+// are unavailable (most commonly across filesystems), it falls back to a
+// copy-then-remove operation with the same no-replace guarantee.
 func moveFile(src, dst string) error {
-	if err := os.Rename(src, dst); err == nil {
+	if err := os.Link(src, dst); err == nil {
+		if err := os.Remove(src); err != nil {
+			return fmt.Errorf("remove original after linking destination: %w", err)
+		}
 		return nil
+	} else if errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("destination already exists: %s", dst)
 	}
 
 	if err := copyFile(src, dst); err != nil {
@@ -175,9 +186,9 @@ func moveFile(src, dst string) error {
 	return nil
 }
 
-// copyFile copies src to dst via a temp file in dst's directory, renamed
-// into place only once the copy fully succeeds, so a failure partway
-// through never leaves a truncated file at dst and never touches src.
+// copyFile copies src to dst via a unique temp file in dst's directory. It
+// publishes the completed temp file without replacing an existing dst and
+// never touches src.
 func copyFile(src, dst string) (err error) {
 	in, err := os.Open(src)
 	if err != nil {
@@ -190,30 +201,77 @@ func copyFile(src, dst string) (err error) {
 		return fmt.Errorf("stat source: %w", err)
 	}
 
-	tmp := dst + ".anime-renamer-tmp"
-	out, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
+	tmp, err := os.CreateTemp(filepath.Dir(dst), "."+filepath.Base(dst)+".anime-renamer-tmp-*")
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
 	}
 	defer func() {
-		out.Close()
-		if err != nil {
-			os.Remove(tmp)
-		}
+		tmp.Close()
+		os.Remove(tmp.Name())
 	}()
+	if err := tmp.Chmod(info.Mode().Perm()); err != nil {
+		return fmt.Errorf("set temp file mode: %w", err)
+	}
 
-	if _, err = io.Copy(out, in); err != nil {
+	if _, err = io.Copy(tmp, in); err != nil {
 		return fmt.Errorf("copy contents: %w", err)
 	}
-	if err = out.Sync(); err != nil {
+	if err = tmp.Sync(); err != nil {
 		return fmt.Errorf("sync copied file: %w", err)
 	}
-	if err = out.Close(); err != nil {
+	if err = tmp.Close(); err != nil {
 		return fmt.Errorf("close copied file: %w", err)
 	}
 
-	if err = os.Rename(tmp, dst); err != nil {
-		return fmt.Errorf("finalize copy: %w", err)
+	if err = publishTempFile(tmp.Name(), dst, info.Mode().Perm()); err != nil {
+		return err
 	}
+	return nil
+}
+
+// publishTempFile installs a completed temp file at dst without overwriting.
+// Hard-linking is atomic. Filesystems without hard-link support fall back to
+// an O_EXCL copy, which retains the no-replace guarantee.
+func publishTempFile(tmp, dst string, mode os.FileMode) error {
+	if err := os.Link(tmp, dst); err == nil {
+		return nil
+	} else if errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("destination already exists: %s", dst)
+	}
+
+	in, err := os.Open(tmp)
+	if err != nil {
+		return fmt.Errorf("open completed temp file: %w", err)
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return fmt.Errorf("destination already exists: %s", dst)
+		}
+		return fmt.Errorf("create destination: %w", err)
+	}
+	removeIncomplete := true
+	defer func() {
+		out.Close()
+		if removeIncomplete {
+			os.Remove(dst)
+		}
+	}()
+
+	if _, err := io.Copy(out, in); err != nil {
+		return fmt.Errorf("publish copied file: %w", err)
+	}
+	if err := out.Sync(); err != nil {
+		return fmt.Errorf("sync destination: %w", err)
+	}
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("close destination: %w", err)
+	}
+	if err := os.Chmod(dst, mode); err != nil {
+		return fmt.Errorf("set destination mode: %w", err)
+	}
+	removeIncomplete = false
 	return nil
 }

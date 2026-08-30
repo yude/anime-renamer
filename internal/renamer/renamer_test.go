@@ -3,6 +3,7 @@ package renamer
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/yude/anime-renamer/internal/annict"
@@ -197,6 +198,40 @@ func TestRenameExistingDestination(t *testing.T) {
 	}
 }
 
+func TestRenameDanglingSymlinkDestination(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks may require additional privileges on Windows")
+	}
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "test.mp4")
+	dst := filepath.Join(dir, "作品", "作品 #7 「テスト」.mp4")
+	if err := os.WriteFile(src, []byte("source"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(dir, "missing"), dst); err != nil {
+		t.Fatal(err)
+	}
+
+	result := &matcher.MatchResult{
+		Work:    &annict.Work{ID: 1, Title: "作品"},
+		Episode: &annict.Episode{ID: 1, Number: float64Ptr(7), Title: "テスト"},
+	}
+	r := Rename(src, result, false, "")
+	if r.Error == nil {
+		t.Fatal("Rename() should reject a dangling symlink destination")
+	}
+	if _, err := os.Lstat(dst); err != nil {
+		t.Errorf("destination symlink should remain untouched: %v", err)
+	}
+	if got, err := os.ReadFile(src); err != nil || string(got) != "source" {
+		t.Errorf("source changed: content=%q error=%v", got, err)
+	}
+}
+
 func TestRenameWithOutputDir(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "test.mp4")
@@ -289,9 +324,58 @@ func TestCopyFile(t *testing.T) {
 		t.Errorf("source should still exist after copyFile: %v", err)
 	}
 
-	// No leftover temp file.
-	if _, err := os.Stat(dst + ".anime-renamer-tmp"); !os.IsNotExist(err) {
-		t.Error("copyFile should not leave a temp file behind on success")
+	// No leftover uniquely named temp file.
+	leftovers, err := filepath.Glob(filepath.Join(dir, ".dst.mp4.anime-renamer-tmp-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(leftovers) != 0 {
+		t.Errorf("copyFile left temp files behind: %v", leftovers)
+	}
+}
+
+func TestCopyFileDoesNotReplaceDestination(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.mp4")
+	dst := filepath.Join(dir, "dst.mp4")
+	if err := os.WriteFile(src, []byte("source"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, []byte("existing"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := copyFile(src, dst); err == nil {
+		t.Fatal("copyFile() should reject an existing destination")
+	}
+	if got, err := os.ReadFile(dst); err != nil || string(got) != "existing" {
+		t.Errorf("destination changed: content=%q error=%v", got, err)
+	}
+	if got, err := os.ReadFile(src); err != nil || string(got) != "source" {
+		t.Errorf("source changed: content=%q error=%v", got, err)
+	}
+}
+
+func TestCopyFileIgnoresStaleLegacyTempName(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.mp4")
+	dst := filepath.Join(dir, "dst.mp4")
+	legacyTemp := dst + ".anime-renamer-tmp"
+	if err := os.WriteFile(src, []byte("source"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacyTemp, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := copyFile(src, dst); err != nil {
+		t.Fatalf("copyFile() error = %v", err)
+	}
+	if got, err := os.ReadFile(dst); err != nil || string(got) != "source" {
+		t.Errorf("destination content=%q error=%v", got, err)
+	}
+	if got, err := os.ReadFile(legacyTemp); err != nil || string(got) != "stale" {
+		t.Errorf("legacy temp file changed: content=%q error=%v", got, err)
 	}
 }
 
@@ -309,8 +393,34 @@ func TestCopyFileCleansUpTempFileOnFailure(t *testing.T) {
 	if err := copyFile(src, dst); err == nil {
 		t.Fatal("copyFile() into a missing directory should fail")
 	}
-	if _, err := os.Stat(dst + ".anime-renamer-tmp"); !os.IsNotExist(err) {
-		t.Error("copyFile should not leave a temp file behind on failure")
+	leftovers, err := filepath.Glob(filepath.Join(dir, "no-such-subdir", ".dst.mp4.anime-renamer-tmp-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(leftovers) != 0 {
+		t.Errorf("copyFile left temp files behind on failure: %v", leftovers)
+	}
+}
+
+func TestMoveFileDoesNotReplaceDestination(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.mp4")
+	dst := filepath.Join(dir, "dst.mp4")
+	if err := os.WriteFile(src, []byte("source"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, []byte("existing"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := moveFile(src, dst); err == nil {
+		t.Fatal("moveFile() should reject an existing destination")
+	}
+	if got, err := os.ReadFile(dst); err != nil || string(got) != "existing" {
+		t.Errorf("destination changed: content=%q error=%v", got, err)
+	}
+	if got, err := os.ReadFile(src); err != nil || string(got) != "source" {
+		t.Errorf("source changed: content=%q error=%v", got, err)
 	}
 }
 
