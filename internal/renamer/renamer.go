@@ -2,6 +2,7 @@ package renamer
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -140,11 +141,72 @@ func Rename(originalPath string, result *matcher.MatchResult, dryRun bool, outpu
 	}
 
 	// Perform rename
-	if err := os.Rename(originalPath, newPath); err != nil {
+	if err := moveFile(originalPath, newPath); err != nil {
 		r.Error = fmt.Errorf("rename failed: %w", err)
 		return r
 	}
 
 	r.Renamed = true
 	return r
+}
+
+// moveFile moves src to dst, falling back to a copy-then-remove when
+// os.Rename fails (as it always does across filesystem/device boundaries,
+// e.g. "invalid cross-device link") — relevant since --output can point
+// anywhere, not just a subdirectory of the source.
+func moveFile(src, dst string) error {
+	if err := os.Rename(src, dst); err == nil {
+		return nil
+	}
+
+	if err := copyFile(src, dst); err != nil {
+		return err
+	}
+	if err := os.Remove(src); err != nil {
+		return fmt.Errorf("remove original after copy: %w", err)
+	}
+	return nil
+}
+
+// copyFile copies src to dst via a temp file in dst's directory, renamed
+// into place only once the copy fully succeeds, so a failure partway
+// through never leaves a truncated file at dst and never touches src.
+func copyFile(src, dst string) (err error) {
+	in, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("open source: %w", err)
+	}
+	defer in.Close()
+
+	info, err := in.Stat()
+	if err != nil {
+		return fmt.Errorf("stat source: %w", err)
+	}
+
+	tmp := dst + ".anime-renamer-tmp"
+	out, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	defer func() {
+		out.Close()
+		if err != nil {
+			os.Remove(tmp)
+		}
+	}()
+
+	if _, err = io.Copy(out, in); err != nil {
+		return fmt.Errorf("copy contents: %w", err)
+	}
+	if err = out.Sync(); err != nil {
+		return fmt.Errorf("sync copied file: %w", err)
+	}
+	if err = out.Close(); err != nil {
+		return fmt.Errorf("close copied file: %w", err)
+	}
+
+	if err = os.Rename(tmp, dst); err != nil {
+		return fmt.Errorf("finalize copy: %w", err)
+	}
+	return nil
 }

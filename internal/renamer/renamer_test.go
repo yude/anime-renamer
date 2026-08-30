@@ -243,3 +243,102 @@ func TestRenameDryRunReportsExistingDestination(t *testing.T) {
 		t.Error("dry-run must not touch the original file")
 	}
 }
+
+func TestCopyFile(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.mp4")
+	dst := filepath.Join(dir, "dst.mp4")
+
+	content := []byte("copied content")
+	if err := os.WriteFile(src, content, 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := copyFile(src, dst); err != nil {
+		t.Fatalf("copyFile() error = %v", err)
+	}
+
+	got, err := os.ReadFile(dst)
+	if err != nil {
+		t.Fatalf("read copied file: %v", err)
+	}
+	if string(got) != string(content) {
+		t.Errorf("copied content = %q, want %q", got, content)
+	}
+
+	// Source must be untouched; copyFile never removes it.
+	if _, err := os.Stat(src); err != nil {
+		t.Errorf("source should still exist after copyFile: %v", err)
+	}
+
+	// No leftover temp file.
+	if _, err := os.Stat(dst + ".anime-renamer-tmp"); !os.IsNotExist(err) {
+		t.Error("copyFile should not leave a temp file behind on success")
+	}
+}
+
+func TestCopyFileCleansUpTempFileOnFailure(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.mp4")
+	if err := os.WriteFile(src, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// A destination inside a non-existent directory makes the temp file
+	// creation fail immediately.
+	dst := filepath.Join(dir, "no-such-subdir", "dst.mp4")
+
+	if err := copyFile(src, dst); err == nil {
+		t.Fatal("copyFile() into a missing directory should fail")
+	}
+	if _, err := os.Stat(dst + ".anime-renamer-tmp"); !os.IsNotExist(err) {
+		t.Error("copyFile should not leave a temp file behind on failure")
+	}
+}
+
+func TestMoveFile_AcrossFilesystems(t *testing.T) {
+	// os.CreateTemp("", ...) lands under the OS temp dir (tmpfs on many
+	// systems), while "." here is the package's own directory on the
+	// repo's regular filesystem — commonly a genuine cross-device pair,
+	// exercising moveFile's copy+remove fallback for os.Rename's
+	// "invalid cross-device link". If the environment happens to put
+	// both on the same filesystem, this still validates moveFile's
+	// plain-rename fast path instead — either way, the move must
+	// succeed and the content must be intact.
+	src, err := os.CreateTemp("", "anime-renamer-move-src-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srcPath := src.Name()
+	defer os.Remove(srcPath)
+
+	content := []byte("cross-device content")
+	if _, err := src.Write(content); err != nil {
+		t.Fatal(err)
+	}
+	if err := src.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	dstDir, err := os.MkdirTemp(".", "scratch-move-dst-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dstDir)
+	dstPath := filepath.Join(dstDir, "moved.mp4")
+
+	if err := moveFile(srcPath, dstPath); err != nil {
+		t.Fatalf("moveFile() error = %v", err)
+	}
+
+	got, err := os.ReadFile(dstPath)
+	if err != nil {
+		t.Fatalf("read moved file: %v", err)
+	}
+	if string(got) != string(content) {
+		t.Errorf("moved content = %q, want %q", got, content)
+	}
+	if _, err := os.Stat(srcPath); !os.IsNotExist(err) {
+		t.Error("original file should not exist after moveFile")
+	}
+}
