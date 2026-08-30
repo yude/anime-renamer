@@ -240,10 +240,20 @@ func (c *Client) searchWorksGraphQL(title string) ([]Work, map[int][]Episode, er
 		return nil, nil, fmt.Errorf("decode search data: %w", err)
 	}
 
+	// Multiple title variants are submitted in one query (see titles
+	// above); if the same underlying work matches more than one variant,
+	// dedupe by AnnictID so callers don't see it twice and mistake it for
+	// genuinely ambiguous results.
 	var works []Work
+	seenWorkIDs := make(map[int]bool)
 	episodesByWork := make(map[int][]Episode)
 	for _, edge := range searchResp.SearchWorks.Edges {
 		node := edge.Node
+		if seenWorkIDs[node.AnnictID] {
+			continue
+		}
+		seenWorkIDs[node.AnnictID] = true
+
 		w := Work{
 			ID:            node.AnnictID,
 			AnnictID:      node.AnnictID,

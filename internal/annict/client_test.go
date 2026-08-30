@@ -46,6 +46,35 @@ func TestSearchWorks_GraphQLSuccessSkipsREST(t *testing.T) {
 	}
 }
 
+func TestSearchWorks_GraphQLDedupesSameWorkAcrossTitleVariants(t *testing.T) {
+	// Regression test: SearchWorks submits multiple title variants (raw,
+	// punctuation-normalized, ...) in a single query. If the same work
+	// matches more than one variant, the response could contain it more
+	// than once; callers (findMatchingWorks and its "len(candidateWorks)
+	// > 1 means ambiguous" logic) must see it exactly once, or a single
+	// real work would be misreported as an ambiguous multi-work match.
+	graphql := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[
+			{"node":{"annictId":1,"title":"作品!","episodesCount":1,"episodes":{"edges":[]}}},
+			{"node":{"annictId":1,"title":"作品!","episodesCount":1,"episodes":{"edges":[]}}}
+		]}}}`)
+	}))
+	defer graphql.Close()
+
+	rest := alwaysFailServer(t)
+	defer rest.Close()
+
+	client := NewClientWithURLs("token", rest.URL, graphql.URL)
+	works, _, err := client.SearchWorks("作品!")
+	if err != nil {
+		t.Fatalf("SearchWorks() error = %v", err)
+	}
+	if len(works) != 1 {
+		t.Errorf("SearchWorks() = %+v, want exactly 1 deduped work, got %d", works, len(works))
+	}
+}
+
 func TestSearchWorks_GraphQLReturnsEmbeddedEpisodes(t *testing.T) {
 	graphql := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
