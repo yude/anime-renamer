@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/yude/anime-renamer/internal/annict"
+	"github.com/yude/anime-renamer/internal/cache"
 	"github.com/yude/anime-renamer/internal/matcher"
 	"github.com/yude/anime-renamer/internal/parser"
 	"github.com/yude/anime-renamer/internal/renamer"
@@ -237,6 +238,51 @@ func TestGetProgramsCachesPerDateNotJustPerWork(t *testing.T) {
 	}
 	if requestCount != 2 {
 		t.Errorf("requests = %d after re-fetching a cached (workID, date), want still 2", requestCount)
+	}
+}
+
+func TestProcessFileFetchesProgramsOnlyForSelectedWork(t *testing.T) {
+	var programWorkIDs []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/graphql":
+			fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[
+				{"node":{"annictId":1,"title":"作品","seasonName":"SUMMER","seasonYear":2026,"episodesCount":1,"episodes":{"edges":[{"node":{"annictId":101,"number":1,"sortNumber":1,"title":"第一話"}}]}}},
+				{"node":{"annictId":2,"title":"作品","seasonName":"SUMMER","seasonYear":2025,"episodesCount":1,"episodes":{"edges":[{"node":{"annictId":201,"number":1,"sortNumber":1,"title":"第一話"}}]}}}
+			]}}}`)
+		case "/programs":
+			programWorkIDs = append(programWorkIDs, r.URL.Query().Get("filter_work_ids"))
+			fmt.Fprint(w, `{"programs":[]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "作品 第1話「第一話」 (20260801).mp4")
+	if err := os.WriteFile(file, []byte("recording"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	client := annict.NewClientWithURLs("token", server.URL, server.URL+"/graphql")
+	result := processFile(
+		file,
+		client,
+		cache.NewDisabled(filepath.Join(dir, "cache")),
+		make(map[string][]annict.Work),
+		make(map[int][]annict.Episode),
+		make(map[programsCacheKey][]annict.Program),
+		true,
+		false,
+		matcher.AutoRenameThreshold,
+		"",
+	)
+	if result.Error != nil {
+		t.Fatalf("processFile() error = %v", result.Error)
+	}
+	if len(programWorkIDs) != 1 || programWorkIDs[0] != "1" {
+		t.Errorf("program API work IDs = %v, want only selected work [1]", programWorkIDs)
 	}
 }
 

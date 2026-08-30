@@ -177,35 +177,36 @@ func processFile(
 		}
 	}
 
-	// Step 4: Get programs for each candidate work. programsByWork is
-	// built fresh per file (unlike workCache/episodesCache, which are
-	// safe to accumulate across the whole run): a work's programs that
-	// matter depend on *this file's* recorded date, so reusing another
-	// file's result here would feed Match() programs from the wrong date
-	// range entirely.
-	programsByWork := make(map[int][]annict.Program)
-	if !meta.RecordedDate.IsZero() {
-		for _, w := range works {
-			programs, err := getPrograms(client, w.ID, meta.RecordedDate, programsCache)
-			if err != nil {
-				if verbose {
-					fmt.Fprintf(os.Stderr, "  Warning: could not get programs for %s: %v\n", w.Title, err)
-				}
-				continue
-			}
-			programsByWork[w.ID] = programs
-			if verbose {
-				fmt.Fprintf(os.Stderr, "  Programs: %d for %q\n", len(programs), w.Title)
-			}
-		}
-	}
-
-	// Step 5: Match
-	result := matcher.Match(meta, works, episodesCache, programsByWork)
+	// Step 4: Match work and episode before fetching date-sensitive program
+	// data. Programs only verify the already-selected episode; they do not
+	// participate in work disambiguation, so fetching them for every work
+	// candidate wastes one API request per rejected candidate.
+	result := matcher.Match(meta, works, episodesCache, nil)
 	if result == nil {
 		return &renamer.RenameResult{
 			OriginalPath: file,
 			Error:        fmt.Errorf("no match found for %q", meta.WorkTitle),
+		}
+	}
+
+	// Step 5: Fetch programs only for the selected work, then rerun matching
+	// to add date/episode verification to the confidence score. The in-memory
+	// cache remains keyed by both work and recording date.
+	if result.Work != nil && result.Episode != nil && !meta.RecordedDate.IsZero() {
+		programs, err := getPrograms(client, result.Work.ID, meta.RecordedDate, programsCache)
+		if err != nil {
+			if verbose {
+				fmt.Fprintf(os.Stderr, "  Warning: could not get programs for %s: %v\n", result.Work.Title, err)
+			}
+		} else {
+			if verbose {
+				fmt.Fprintf(os.Stderr, "  Programs: %d for %q\n", len(programs), result.Work.Title)
+			}
+			if len(programs) > 0 {
+				result = matcher.Match(meta, works, episodesCache, map[int][]annict.Program{
+					result.Work.ID: programs,
+				})
+			}
 		}
 	}
 
