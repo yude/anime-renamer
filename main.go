@@ -117,6 +117,16 @@ func main() {
 	fmt.Fprintf(os.Stderr, "Renamed: %d\n", renamed)
 	fmt.Fprintf(os.Stderr, "Skipped: %d\n", skipped)
 	fmt.Fprintf(os.Stderr, "Failed:  %d\n", failed)
+	if code := exitCodeForFailures(failed); code != 0 {
+		os.Exit(code)
+	}
+}
+
+func exitCodeForFailures(failed int) int {
+	if failed > 0 {
+		return 1
+	}
+	return 0
 }
 
 func processFile(
@@ -467,10 +477,21 @@ func readTokenFromEnvFile(path string) (string, bool) {
 			continue
 		}
 		key, value, ok := strings.Cut(line, "=")
-		if !ok || key != "ANNICT_ACCESS_TOKEN" {
+		if !ok {
 			continue
 		}
-		return strings.Trim(value, "'\""), true
+		key = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(key), "export "))
+		if key != "ANNICT_ACCESS_TOKEN" {
+			continue
+		}
+		value = strings.TrimSpace(value)
+		if len(value) >= 2 && ((value[0] == '\'' && value[len(value)-1] == '\'') || (value[0] == '"' && value[len(value)-1] == '"')) {
+			value = value[1 : len(value)-1]
+		}
+		if value == "" {
+			continue
+		}
+		return value, true
 	}
 	return "", false
 }

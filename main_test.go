@@ -73,6 +73,47 @@ func TestLoadTokenFromDotenv_NoEnvFileTerminates(t *testing.T) {
 	}
 }
 
+func TestReadTokenFromEnvFileCommonDotenvSyntax(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{name: "spaces around assignment", content: "ANNICT_ACCESS_TOKEN = token-with-spaces\n", want: "token-with-spaces"},
+		{name: "double quoted", content: "ANNICT_ACCESS_TOKEN=\"quoted-token\"\n", want: "quoted-token"},
+		{name: "single quoted export", content: "export ANNICT_ACCESS_TOKEN='exported-token'\n", want: "exported-token"},
+		{name: "skip empty assignment", content: "ANNICT_ACCESS_TOKEN=\nANNICT_ACCESS_TOKEN=fallback\n", want: "fallback"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), ".env")
+			if err := os.WriteFile(path, []byte(tt.content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			got, ok := readTokenFromEnvFile(path)
+			if !ok || got != tt.want {
+				t.Errorf("readTokenFromEnvFile() = %q, %v; want %q, true", got, ok, tt.want)
+			}
+		})
+	}
+}
+
+func TestExitCodeForFailures(t *testing.T) {
+	for _, tt := range []struct {
+		failed int
+		want   int
+	}{
+		{failed: 0, want: 0},
+		{failed: 1, want: 1},
+		{failed: 10, want: 1},
+	} {
+		if got := exitCodeForFailures(tt.failed); got != tt.want {
+			t.Errorf("exitCodeForFailures(%d) = %d, want %d", tt.failed, got, tt.want)
+		}
+	}
+}
+
 func TestCollectFiles_SingleFile(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "video.mp4")
