@@ -2,6 +2,7 @@ package annict
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -402,5 +403,53 @@ func TestGet_RetriesRateLimitStatus(t *testing.T) {
 	}
 	if len(works) != 1 || works[0].Title != "レート制限後" {
 		t.Errorf("searchWorksREST() = %+v, want single work after retry", works)
+	}
+}
+
+func TestGetTruncatesPermanentErrorResponse(t *testing.T) {
+	attempts := 0
+	rest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, strings.Repeat("x", maxErrorBodyBytes+100))
+	}))
+	defer rest.Close()
+
+	client := NewClientWithBaseURL("token", rest.URL)
+	_, err := client.searchWorksREST("作品")
+	if err == nil || !strings.Contains(err.Error(), "[truncated]") {
+		t.Fatalf("searchWorksREST() error = %v, want truncated response marker", err)
+	}
+	if attempts != 1 {
+		t.Errorf("server received %d attempts, want 1 for permanent 400", attempts)
+	}
+	if len(err.Error()) > maxErrorBodyBytes+200 {
+		t.Errorf("error length = %d, want bounded diagnostic", len(err.Error()))
+	}
+}
+
+func TestReadResponseBodyLimitsSuccessfulResponse(t *testing.T) {
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       io.NopCloser(strings.NewReader(strings.Repeat("x", maxResponseBodyBytes+1))),
+	}
+	body, truncated, err := readResponseBody(resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !truncated || len(body) != maxResponseBodyBytes {
+		t.Errorf("readResponseBody() length=%d truncated=%v, want %d,true", len(body), truncated, maxResponseBodyBytes)
+	}
+}
+
+func TestAdvancePage(t *testing.T) {
+	if _, more, err := advancePage(1, pageSize-1); err != nil || more {
+		t.Errorf("advancePage(short page) = more %v, error %v; want false,nil", more, err)
+	}
+	if next, more, err := advancePage(1, pageSize); err != nil || !more || next != 2 {
+		t.Errorf("advancePage(full page) = %d,%v,%v; want 2,true,nil", next, more, err)
+	}
+	if _, _, err := advancePage(maxPaginationPages, pageSize); err == nil {
+		t.Error("advancePage() at safety limit should fail")
 	}
 }

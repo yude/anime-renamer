@@ -31,8 +31,12 @@ func normalizePunctForSearch(s string) string {
 }
 
 const (
-	defaultBaseURL  = "https://api.annict.com/v1"
-	graphqlEndpoint = "https://api.annict.com/graphql"
+	defaultBaseURL       = "https://api.annict.com/v1"
+	graphqlEndpoint      = "https://api.annict.com/graphql"
+	pageSize             = 50
+	maxPaginationPages   = 100
+	maxResponseBodyBytes = 4 << 20
+	maxErrorBodyBytes    = 16 << 10
 )
 
 // retrySleep is overridable in tests so retry-exhaustion paths don't have to
@@ -319,7 +323,7 @@ func (c *Client) GetEpisodes(workID int) ([]Episode, error) {
 		params.Set("filter_work_id", strconv.Itoa(workID))
 		params.Set("fields", "id,number,number_text,sort_number,title")
 		params.Set("sort_sort_number", "asc")
-		params.Set("per_page", "50")
+		params.Set("per_page", strconv.Itoa(pageSize))
 		params.Set("page", strconv.Itoa(page))
 
 		var resp EpisodesResponse
@@ -332,10 +336,14 @@ func (c *Client) GetEpisodes(workID int) ([]Episode, error) {
 		}
 		allEpisodes = append(allEpisodes, resp.Episodes...)
 
-		if len(resp.Episodes) < 50 {
+		next, more, err := advancePage(page, len(resp.Episodes))
+		if err != nil {
+			return nil, fmt.Errorf("get episodes: %w", err)
+		}
+		if !more {
 			break
 		}
-		page++
+		page = next
 	}
 
 	return allEpisodes, nil
@@ -357,7 +365,7 @@ func (c *Client) GetPrograms(workID int, since, until time.Time) ([]Program, err
 		// findMatchingProgram's episode-ID matching.
 		params.Set("fields", "id,started_at,is_rebroadcast,channel,episode")
 		params.Set("sort_started_at", "asc")
-		params.Set("per_page", "50")
+		params.Set("per_page", strconv.Itoa(pageSize))
 		params.Set("page", strconv.Itoa(page))
 
 		var resp ProgramsResponse
@@ -367,10 +375,14 @@ func (c *Client) GetPrograms(workID int, since, until time.Time) ([]Program, err
 
 		allPrograms = append(allPrograms, resp.Programs...)
 
-		if len(resp.Programs) < 50 {
+		next, more, err := advancePage(page, len(resp.Programs))
+		if err != nil {
+			return nil, fmt.Errorf("get programs: %w", err)
+		}
+		if !more {
 			break
 		}
-		page++
+		page = next
 	}
 
 	return allPrograms, nil
@@ -404,18 +416,26 @@ func (c *Client) postGraphQL(query graphqlQuery) ([]byte, error) {
 			continue
 		}
 
-		respBody, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		respBody, truncated, err := readResponseBody(resp)
 		if err != nil {
 			lastErr = fmt.Errorf("read response: %w", err)
+			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				if !isRetryableStatus(resp.StatusCode) {
+					return nil, lastErr
+				}
+			}
 			continue
 		}
 
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			lastErr = fmt.Errorf("HTTP %d from graphql: %s", resp.StatusCode, strings.TrimSpace(string(respBody)))
+			lastErr = fmt.Errorf("HTTP %d from graphql: %s%s", resp.StatusCode, strings.TrimSpace(string(respBody)), truncationSuffix(truncated))
 			if !isRetryableStatus(resp.StatusCode) {
 				return nil, lastErr
 			}
+			continue
+		}
+		if truncated {
+			lastErr = fmt.Errorf("graphql response exceeds %d bytes", maxResponseBodyBytes)
 			continue
 		}
 
@@ -448,18 +468,26 @@ func (c *Client) get(path string, params url.Values, result interface{}) error {
 			continue
 		}
 
-		respBody, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		respBody, truncated, err := readResponseBody(resp)
 		if err != nil {
 			lastErr = fmt.Errorf("read response: %w", err)
+			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				if !isRetryableStatus(resp.StatusCode) {
+					return lastErr
+				}
+			}
 			continue
 		}
 
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			lastErr = fmt.Errorf("HTTP %d from %s: %s", resp.StatusCode, path, strings.TrimSpace(string(respBody)))
+			lastErr = fmt.Errorf("HTTP %d from %s: %s%s", resp.StatusCode, path, strings.TrimSpace(string(respBody)), truncationSuffix(truncated))
 			if !isRetryableStatus(resp.StatusCode) {
 				return lastErr
 			}
+			continue
+		}
+		if truncated {
+			lastErr = fmt.Errorf("response from %s exceeds %d bytes", path, maxResponseBodyBytes)
 			continue
 		}
 
@@ -472,4 +500,37 @@ func (c *Client) get(path string, params url.Values, result interface{}) error {
 	}
 
 	return fmt.Errorf("all retries failed: %w", lastErr)
+}
+
+func advancePage(currentPage, itemCount int) (next int, more bool, err error) {
+	if itemCount < pageSize {
+		return currentPage, false, nil
+	}
+	if currentPage >= maxPaginationPages {
+		return 0, false, fmt.Errorf("pagination exceeded %d pages", maxPaginationPages)
+	}
+	return currentPage + 1, true, nil
+}
+
+func readResponseBody(resp *http.Response) (body []byte, truncated bool, err error) {
+	defer resp.Body.Close()
+	limit := maxResponseBodyBytes
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		limit = maxErrorBodyBytes
+	}
+	body, err = io.ReadAll(io.LimitReader(resp.Body, int64(limit)+1))
+	if err != nil {
+		return nil, false, err
+	}
+	if len(body) > limit {
+		return body[:limit], true, nil
+	}
+	return body, false, nil
+}
+
+func truncationSuffix(truncated bool) string {
+	if truncated {
+		return " [truncated]"
+	}
+	return ""
 }
