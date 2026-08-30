@@ -64,12 +64,11 @@ func kanjiToInt(s string) (int, bool) {
 		return 0, false
 	}
 
-	runes := []rune(s)
 	result := 0
 	current := 0
 	hasKanji := false
 
-	for _, r := range runes {
+	for _, r := range s {
 		v, ok := kanjiDigits[r]
 		if !ok {
 			return 0, false
