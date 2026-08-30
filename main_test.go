@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -128,6 +130,35 @@ func TestCollectFiles_DirectoryRecursive(t *testing.T) {
 	}
 	if len(files) != 2 {
 		t.Errorf("collectFiles(recursive) returned %d files, want 2: %v", len(files), files)
+	}
+}
+
+func TestCollectFiles_RecursiveWalkErrorIsReturned(t *testing.T) {
+	dir := t.TempDir()
+	walkErr := errors.New("permission denied")
+	walker := func(root string, fn fs.WalkDirFunc) error {
+		return fn(filepath.Join(root, "blocked"), nil, walkErr)
+	}
+
+	files, err := collectFilesWithWalker(dir, true, walker)
+	if !errors.Is(err, walkErr) {
+		t.Fatalf("collectFilesWithWalker() error = %v, want wrapped %v", err, walkErr)
+	}
+	if files != nil {
+		t.Errorf("collectFilesWithWalker() files = %v, want nil on incomplete traversal", files)
+	}
+}
+
+func TestValidateConfidenceThreshold(t *testing.T) {
+	for _, value := range []int{0, 50, 90, 100} {
+		if err := validateConfidenceThreshold(value); err != nil {
+			t.Errorf("validateConfidenceThreshold(%d) error = %v, want nil", value, err)
+		}
+	}
+	for _, value := range []int{-1, 101} {
+		if err := validateConfidenceThreshold(value); err == nil {
+			t.Errorf("validateConfidenceThreshold(%d) error = nil, want range error", value)
+		}
 	}
 }
 

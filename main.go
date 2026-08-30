@@ -45,6 +45,9 @@ func main() {
 		flag.Usage()
 		os.Exit(1)
 	}
+	if err := validateConfidenceThreshold(*confidenceThreshold); err != nil {
+		log.Fatal(err)
+	}
 
 	// Get access token
 	token := os.Getenv("ANNICT_ACCESS_TOKEN")
@@ -363,6 +366,12 @@ func getPrograms(client *annict.Client, workID int, date time.Time, pc map[progr
 }
 
 func collectFiles(target string, recursive bool) ([]string, error) {
+	return collectFilesWithWalker(target, recursive, filepath.WalkDir)
+}
+
+type walkDirFunc func(string, fs.WalkDirFunc) error
+
+func collectFilesWithWalker(target string, recursive bool, walk walkDirFunc) ([]string, error) {
 	info, err := os.Stat(target)
 	if err != nil {
 		return nil, fmt.Errorf("stat %s: %w", target, err)
@@ -376,9 +385,9 @@ func collectFiles(target string, recursive bool) ([]string, error) {
 	exts := map[string]bool{".mp4": true, ".ts": true, ".mkv": true, ".m4v": true}
 
 	if recursive {
-		err = filepath.WalkDir(target, func(path string, d fs.DirEntry, err error) error {
+		err = walk(target, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
-				return nil
+				return err
 			}
 			if d.IsDir() {
 				return nil
@@ -389,6 +398,9 @@ func collectFiles(target string, recursive bool) ([]string, error) {
 			}
 			return nil
 		})
+		if err != nil {
+			return nil, fmt.Errorf("walk dir %s: %w", target, err)
+		}
 	} else {
 		entries, err := os.ReadDir(target)
 		if err != nil {
@@ -405,7 +417,14 @@ func collectFiles(target string, recursive bool) ([]string, error) {
 		}
 	}
 
-	return files, err
+	return files, nil
+}
+
+func validateConfidenceThreshold(value int) error {
+	if value < 0 || value > 100 {
+		return fmt.Errorf("confidence must be between 0 and 100: %d", value)
+	}
+	return nil
 }
 
 // loadTokenFromDotenv looks for .env in target's own directory (or target
