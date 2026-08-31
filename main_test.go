@@ -359,7 +359,7 @@ func TestProcessFileFetchesProgramsOnlyForSelectedWork(t *testing.T) {
 				{"node":{"annictId":1,"title":"作品","seasonName":"SUMMER","seasonYear":2026,"episodesCount":1,"episodes":{"edges":[{"node":{"annictId":101,"number":1,"sortNumber":1,"title":"第一話"}}]}}},
 				{"node":{"annictId":2,"title":"作品","seasonName":"SUMMER","seasonYear":2025,"episodesCount":1,"episodes":{"edges":[{"node":{"annictId":201,"number":1,"sortNumber":1,"title":"第一話"}}]}}}
 			]}}}`)
-		case "/programs":
+		case "/me/programs":
 			programWorkIDs = append(programWorkIDs, r.URL.Query().Get("filter_work_ids"))
 			fmt.Fprint(w, `{"programs":[{"id":1,"started_at":"2026-08-01T12:00:00+09:00","episode":{"id":101}}]}`)
 		default:
@@ -403,7 +403,7 @@ func TestProcessFileSkipsProgramsWhenConfidenceAlreadyMeetsThreshold(t *testing.
 			fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[
 				{"node":{"annictId":1,"title":"作品","seasonName":"SUMMER","seasonYear":2026,"episodesCount":1,"episodes":{"edges":[{"node":{"annictId":101,"number":1,"sortNumber":1,"title":"第一話"}}]}}}
 			]}}}`)
-		case "/programs":
+		case "/me/programs":
 			programRequests++
 			fmt.Fprint(w, `{"programs":[]}`)
 		default:

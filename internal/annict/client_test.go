@@ -295,19 +295,23 @@ func joinJSON(items []string) string {
 }
 
 func TestGetPrograms_SendsDateRangeAndWorkID(t *testing.T) {
-	since := time.Date(2026, 8, 12, 0, 0, 0, 0, time.UTC)
-	until := time.Date(2026, 8, 14, 0, 0, 0, 0, time.UTC)
+	jst := time.FixedZone("JST", 9*60*60)
+	since := time.Date(2026, 8, 12, 0, 0, 0, 0, jst)
+	until := time.Date(2026, 8, 14, 0, 0, 0, 0, jst)
 
 	rest := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/me/programs" {
+			t.Errorf("request path = %q, want /me/programs", r.URL.Path)
+		}
 		q := r.URL.Query()
 		if got := q.Get("filter_work_ids"); got != "7" {
 			t.Errorf("filter_work_ids = %q, want 7", got)
 		}
-		if got := q.Get("filter_started_at_gt"); got != since.Format("2006/01/02 15:04") {
-			t.Errorf("filter_started_at_gt = %q, want %q", got, since.Format("2006/01/02 15:04"))
+		if got := q.Get("filter_started_at_gt"); got != since.UTC().Format("2006/01/02 15:04") {
+			t.Errorf("filter_started_at_gt = %q, want %q", got, since.UTC().Format("2006/01/02 15:04"))
 		}
-		if got := q.Get("filter_started_at_lt"); got != until.Format("2006/01/02 15:04") {
-			t.Errorf("filter_started_at_lt = %q, want %q", got, until.Format("2006/01/02 15:04"))
+		if got := q.Get("filter_started_at_lt"); got != until.UTC().Format("2006/01/02 15:04") {
+			t.Errorf("filter_started_at_lt = %q, want %q", got, until.UTC().Format("2006/01/02 15:04"))
 		}
 		// Regression: "episode" must be in the requested field list, or
 		// Annict's real API omits it from the response entirely, leaving

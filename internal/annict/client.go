@@ -358,8 +358,11 @@ func (c *Client) GetPrograms(workID int, since, until time.Time) ([]Program, err
 	for {
 		params := url.Values{}
 		params.Set("filter_work_ids", strconv.Itoa(workID))
-		params.Set("filter_started_at_gt", since.Format("2006/01/02 15:04"))
-		params.Set("filter_started_at_lt", until.Format("2006/01/02 15:04"))
+		// Annict interprets these timezone-less filter values as UTC. Convert
+		// explicitly so callers can pass recording dates in JST without
+		// shifting the requested window by nine hours.
+		params.Set("filter_started_at_gt", since.UTC().Format("2006/01/02 15:04"))
+		params.Set("filter_started_at_lt", until.UTC().Format("2006/01/02 15:04"))
 		// "episode" must be requested explicitly (like "channel" already
 		// was) or Annict omits it from the response entirely, leaving
 		// Program.Episode.ID at its zero value — silently disabling
@@ -370,7 +373,7 @@ func (c *Client) GetPrograms(workID int, since, until time.Time) ([]Program, err
 		params.Set("page", strconv.Itoa(page))
 
 		var resp ProgramsResponse
-		if err := c.get("/programs", params, &resp); err != nil {
+		if err := c.get("/me/programs", params, &resp); err != nil {
 			return nil, fmt.Errorf("get programs: %w", err)
 		}
 
