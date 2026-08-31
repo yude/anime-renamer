@@ -200,10 +200,13 @@ func processFile(
 		}
 	}
 
-	// Step 5: Fetch programs only for the selected work, then rerun matching
-	// to add date/episode verification to the confidence score. The in-memory
-	// cache remains keyed by both work and recording date.
-	if result.Work != nil && result.Episode != nil && !meta.RecordedDate.IsZero() {
+	// Step 5: Fetch programs only when date verification can change the
+	// threshold decision, or when verbose output explicitly requests program
+	// details. Programs do not alter the selected work or episode, so a normal
+	// exact match that already meets the threshold needs no extra API round
+	// trip. The in-memory cache remains keyed by work and recording date.
+	needsProgram := verbose || result.Confidence < confidenceThreshold
+	if needsProgram && result.Work != nil && result.Episode != nil && !meta.RecordedDate.IsZero() {
 		programs, err := getPrograms(client, result.Work.ID, meta.RecordedDate, programsCache)
 		if err != nil {
 			if verbose {

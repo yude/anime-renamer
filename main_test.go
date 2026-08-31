@@ -361,6 +361,50 @@ func TestProcessFileFetchesProgramsOnlyForSelectedWork(t *testing.T) {
 			]}}}`)
 		case "/programs":
 			programWorkIDs = append(programWorkIDs, r.URL.Query().Get("filter_work_ids"))
+			fmt.Fprint(w, `{"programs":[{"id":1,"started_at":"2026-08-01T12:00:00+09:00","episode":{"id":101}}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "作品 第1話「第一話・拡大版」 (20260801).mp4")
+	if err := os.WriteFile(file, []byte("recording"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	client := annict.NewClientWithURLs("token", server.URL, server.URL+"/graphql")
+	result := processFile(
+		file,
+		client,
+		cache.NewDisabled(filepath.Join(dir, "cache")),
+		make(map[string][]annict.Work),
+		make(map[int][]annict.Episode),
+		make(map[programsCacheKey][]annict.Program),
+		true,
+		false,
+		matcher.AutoRenameThreshold,
+		"",
+	)
+	if result.Error != nil {
+		t.Fatalf("processFile() error = %v", result.Error)
+	}
+	if len(programWorkIDs) != 1 || programWorkIDs[0] != "1" {
+		t.Errorf("program API work IDs = %v, want only selected work [1]", programWorkIDs)
+	}
+}
+
+func TestProcessFileSkipsProgramsWhenConfidenceAlreadyMeetsThreshold(t *testing.T) {
+	programRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/graphql":
+			fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[
+				{"node":{"annictId":1,"title":"作品","seasonName":"SUMMER","seasonYear":2026,"episodesCount":1,"episodes":{"edges":[{"node":{"annictId":101,"number":1,"sortNumber":1,"title":"第一話"}}]}}}
+			]}}}`)
+		case "/programs":
+			programRequests++
 			fmt.Fprint(w, `{"programs":[]}`)
 		default:
 			http.NotFound(w, r)
@@ -389,8 +433,8 @@ func TestProcessFileFetchesProgramsOnlyForSelectedWork(t *testing.T) {
 	if result.Error != nil {
 		t.Fatalf("processFile() error = %v", result.Error)
 	}
-	if len(programWorkIDs) != 1 || programWorkIDs[0] != "1" {
-		t.Errorf("program API work IDs = %v, want only selected work [1]", programWorkIDs)
+	if programRequests != 0 {
+		t.Errorf("program API requests = %d, want 0 after confidence already met threshold", programRequests)
 	}
 }
 
