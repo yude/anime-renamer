@@ -98,6 +98,12 @@ func BuildPath(originalPath string, result *matcher.MatchResult) (string, error)
 	}
 	dir := filepath.Dir(originalPath)
 	workDir := filepath.Join(dir, workTitle)
+	if filepath.Base(dir) == workTitle {
+		// A recursive rerun sees files already placed in their work directory.
+		// Treat that directory as canonical instead of nesting another copy of
+		// the same title on every run.
+		workDir = dir
+	}
 
 	// Use file subtitle when Annict episode has no title
 	subtitle := result.Episode.Title
@@ -141,12 +147,8 @@ func Rename(originalPath string, result *matcher.MatchResult, dryRun bool, outpu
 	}
 
 	if outputDir != "" {
-		rel, err := filepath.Rel(filepath.Dir(originalPath), newPath)
-		if err != nil {
-			r.Error = fmt.Errorf("compute output path: %w", err)
-			return r
-		}
-		newPath = filepath.Join(outputDir, rel)
+		workTitle := filepath.Base(filepath.Dir(newPath))
+		newPath = filepath.Join(outputDir, workTitle, filepath.Base(newPath))
 	}
 
 	r.NewPath = newPath

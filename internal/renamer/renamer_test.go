@@ -32,6 +32,15 @@ func TestBuildPath(t *testing.T) {
 			wantPath: "/recordings/花ざかりの君たちへ 第2期/花ざかりの君たちへ 第2期 #7 「ずっとそばにいたいから」.mp4",
 		},
 		{
+			name:         "already inside work directory is not nested again",
+			originalPath: "/recordings/作品/作品 #1 「第一話」.mp4",
+			match: &matcher.MatchResult{
+				Work:    &annict.Work{ID: 1, Title: "作品"},
+				Episode: &annict.Episode{ID: 1, Number: float64Ptr(1), Title: "第一話"},
+			},
+			wantPath: "/recordings/作品/作品 #1 「第一話」.mp4",
+		},
+		{
 			name:         "episode 10 no zero pad",
 			originalPath: "/recordings/作品 ep.10「テスト」 (20260801).mp4",
 			match: &matcher.MatchResult{
@@ -208,6 +217,34 @@ func TestRenameActual(t *testing.T) {
 	}
 }
 
+func TestRenameAlreadyAtDestinationIsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	workDir := filepath.Join(dir, "作品")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(workDir, "作品 #1 「第一話」.mp4")
+	if err := os.WriteFile(src, []byte("recording"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := &matcher.MatchResult{
+		Work:    &annict.Work{ID: 1, Title: "作品"},
+		Episode: &annict.Episode{ID: 1, Number: float64Ptr(1), Title: "第一話"},
+	}
+	r := Rename(src, result, false, "")
+	if r.Error != nil || !r.Renamed {
+		t.Fatalf("Rename() = %+v, want successful no-op", r)
+	}
+	if r.NewPath != src {
+		t.Errorf("Rename() NewPath = %q, want unchanged %q", r.NewPath, src)
+	}
+	nested := filepath.Join(workDir, "作品", filepath.Base(src))
+	if _, err := os.Stat(nested); !os.IsNotExist(err) {
+		t.Errorf("recursive rerun created nested destination %s", nested)
+	}
+}
+
 func TestRenameExistingDestination(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "test.mp4")
@@ -299,6 +336,35 @@ func TestRenameWithOutputDir(t *testing.T) {
 	}
 	if _, err := os.Stat(src); !os.IsNotExist(err) {
 		t.Error("original file should not exist after rename")
+	}
+}
+
+func TestRenameWithOutputDirPreservesWorkDirectoryForOrganizedInput(t *testing.T) {
+	dir := t.TempDir()
+	sourceWorkDir := filepath.Join(dir, "作品")
+	if err := os.MkdirAll(sourceWorkDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(sourceWorkDir, "作品 #1 「第一話」.mp4")
+	if err := os.WriteFile(src, []byte("recording"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outputDir := filepath.Join(dir, "out")
+	result := &matcher.MatchResult{
+		Work:    &annict.Work{ID: 1, Title: "作品"},
+		Episode: &annict.Episode{ID: 1, Number: float64Ptr(1), Title: "第一話"},
+	}
+
+	r := Rename(src, result, false, outputDir)
+	want := filepath.Join(outputDir, "作品", filepath.Base(src))
+	if r.Error != nil || !r.Renamed {
+		t.Fatalf("Rename() = %+v, want successful move", r)
+	}
+	if r.NewPath != want {
+		t.Errorf("Rename() NewPath = %q, want %q", r.NewPath, want)
+	}
+	if _, err := os.Stat(want); err != nil {
+		t.Errorf("output file missing: %v", err)
 	}
 }
 
