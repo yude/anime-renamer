@@ -383,17 +383,32 @@ func collectFiles(target string, recursive bool) ([]string, error) {
 type walkDirFunc func(string, fs.WalkDirFunc) error
 
 func collectFilesWithWalker(target string, recursive bool, walk walkDirFunc) ([]string, error) {
-	info, err := os.Stat(target)
+	info, err := os.Lstat(target)
 	if err != nil {
 		return nil, fmt.Errorf("stat %s: %w", target, err)
 	}
 
 	if !info.IsDir() {
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("target is not a regular file: %s", target)
+		}
 		return []string{target}, nil
 	}
 
 	var files []string
-	exts := map[string]bool{".mp4": true, ".ts": true, ".mkv": true, ".m4v": true}
+	appendRecording := func(path string, entry fs.DirEntry) error {
+		if !isSupportedRecordingExtension(path) {
+			return nil
+		}
+		entryInfo, err := entry.Info()
+		if err != nil {
+			return fmt.Errorf("stat candidate %s: %w", path, err)
+		}
+		if entryInfo.Mode().IsRegular() {
+			files = append(files, path)
+		}
+		return nil
+	}
 
 	if recursive {
 		err = walk(target, func(path string, d fs.DirEntry, err error) error {
@@ -403,11 +418,7 @@ func collectFilesWithWalker(target string, recursive bool, walk walkDirFunc) ([]
 			if d.IsDir() {
 				return nil
 			}
-			ext := strings.ToLower(filepath.Ext(path))
-			if exts[ext] {
-				files = append(files, path)
-			}
-			return nil
+			return appendRecording(path, d)
 		})
 		if err != nil {
 			return nil, fmt.Errorf("walk dir %s: %w", target, err)
@@ -421,14 +432,22 @@ func collectFilesWithWalker(target string, recursive bool, walk walkDirFunc) ([]
 			if e.IsDir() {
 				continue
 			}
-			ext := strings.ToLower(filepath.Ext(e.Name()))
-			if exts[ext] {
-				files = append(files, filepath.Join(target, e.Name()))
+			if err := appendRecording(filepath.Join(target, e.Name()), e); err != nil {
+				return nil, err
 			}
 		}
 	}
 
 	return files, nil
+}
+
+func isSupportedRecordingExtension(path string) bool {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".mp4", ".ts", ".mkv", ".m4v":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateConfidenceThreshold(value int) error {

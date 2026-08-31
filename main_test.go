@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -130,6 +131,26 @@ func TestCollectFiles_SingleFile(t *testing.T) {
 	}
 }
 
+func TestCollectFiles_RejectsExplicitSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks may require additional privileges on Windows")
+	}
+
+	dir := t.TempDir()
+	realFile := filepath.Join(dir, "real.mp4")
+	link := filepath.Join(dir, "link.mp4")
+	if err := os.WriteFile(realFile, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realFile, link); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := collectFiles(link, false); err == nil {
+		t.Error("collectFiles() should reject an explicitly targeted symlink")
+	}
+}
+
 func TestCollectFiles_DirectoryNonRecursive(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"a.mp4", "b.ts", "ignore.txt"} {
@@ -172,6 +193,30 @@ func TestCollectFiles_DirectoryRecursive(t *testing.T) {
 	}
 	if len(files) != 2 {
 		t.Errorf("collectFiles(recursive) returned %d files, want 2: %v", len(files), files)
+	}
+}
+
+func TestCollectFiles_DirectorySkipsSymlinkedRecordings(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks may require additional privileges on Windows")
+	}
+
+	dir := t.TempDir()
+	realFile := filepath.Join(dir, "real.mp4")
+	link := filepath.Join(dir, "link.mp4")
+	if err := os.WriteFile(realFile, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realFile, link); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := collectFiles(dir, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0] != realFile {
+		t.Errorf("collectFiles() = %v, want only regular file %s", files, realFile)
 	}
 }
 
