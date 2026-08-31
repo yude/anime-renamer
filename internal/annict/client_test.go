@@ -161,6 +161,23 @@ func TestSearchWorks_GraphQL401DoesNotRetry(t *testing.T) {
 	}
 }
 
+func TestSearchWorksWithoutTokenDoesNotContactAPI(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		http.Error(w, "should not be contacted", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := NewClientWithURLs("", server.URL, server.URL+"/graphql")
+	if _, _, err := client.SearchWorks("作品"); err == nil {
+		t.Fatal("SearchWorks() error = nil, want missing-token error")
+	}
+	if requests != 0 {
+		t.Errorf("API requests = %d, want 0 without an access token", requests)
+	}
+}
+
 func TestSearchWorks_RESTFallbackReturnsNoEpisodes(t *testing.T) {
 	graphql := alwaysFailServer(t)
 	defer graphql.Close()
@@ -403,6 +420,29 @@ func TestGet_RetriesRateLimitStatus(t *testing.T) {
 	}
 	if len(works) != 1 || works[0].Title != "レート制限後" {
 		t.Errorf("searchWorksREST() = %+v, want single work after retry", works)
+	}
+}
+
+func TestRetryDelay(t *testing.T) {
+	now := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	for _, tt := range []struct {
+		name       string
+		attempt    int
+		retryAfter string
+		want       time.Duration
+	}{
+		{name: "default backoff", attempt: 2, want: 2 * time.Second},
+		{name: "server seconds", attempt: 1, retryAfter: "5", want: 5 * time.Second},
+		{name: "short server delay keeps backoff", attempt: 2, retryAfter: "1", want: 2 * time.Second},
+		{name: "HTTP date", attempt: 1, retryAfter: now.Add(4 * time.Second).Format(http.TimeFormat), want: 4 * time.Second},
+		{name: "server delay is bounded", attempt: 1, retryAfter: "3600", want: maxRetryDelay},
+		{name: "invalid header", attempt: 1, retryAfter: "later", want: time.Second},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := retryDelay(tt.attempt, tt.retryAfter, now); got != tt.want {
+				t.Errorf("retryDelay() = %s, want %s", got, tt.want)
+			}
+		})
 	}
 }
 

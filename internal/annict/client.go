@@ -37,6 +37,7 @@ const (
 	maxPaginationPages   = 100
 	maxResponseBodyBytes = 4 << 20
 	maxErrorBodyBytes    = 16 << 10
+	maxRetryDelay        = 30 * time.Second
 )
 
 // retrySleep is overridable in tests so retry-exhaustion paths don't have to
@@ -390,16 +391,22 @@ func (c *Client) GetPrograms(workID int, since, until time.Time) ([]Program, err
 
 // postGraphQL sends a GraphQL request and returns the raw response body.
 func (c *Client) postGraphQL(query graphqlQuery) ([]byte, error) {
+	if c.accessToken == "" {
+		return nil, fmt.Errorf("ANNICT_ACCESS_TOKEN is required for API requests")
+	}
+
 	body, err := json.Marshal(query)
 	if err != nil {
 		return nil, fmt.Errorf("marshal query: %w", err)
 	}
 
 	var lastErr error
+	nextRetryAfter := ""
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
-			retrySleep(time.Duration(attempt) * time.Second)
+			retrySleep(retryDelay(attempt, nextRetryAfter, time.Now()))
 		}
+		nextRetryAfter = ""
 
 		req, err := http.NewRequest("POST", c.graphqlURL, bytes.NewReader(body))
 		if err != nil {
@@ -415,6 +422,7 @@ func (c *Client) postGraphQL(query graphqlQuery) ([]byte, error) {
 			lastErr = fmt.Errorf("HTTP POST graphql: %w", err)
 			continue
 		}
+		nextRetryAfter = resp.Header.Get("Retry-After")
 
 		respBody, truncated, err := readResponseBody(resp)
 		if err != nil {
@@ -447,13 +455,19 @@ func (c *Client) postGraphQL(query graphqlQuery) ([]byte, error) {
 
 // get performs an HTTP GET request and decodes the JSON response.
 func (c *Client) get(path string, params url.Values, result interface{}) error {
+	if c.accessToken == "" {
+		return fmt.Errorf("ANNICT_ACCESS_TOKEN is required for API requests")
+	}
+
 	u := c.baseURL + path + "?" + params.Encode()
 
 	var lastErr error
+	nextRetryAfter := ""
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
-			retrySleep(time.Duration(attempt) * time.Second)
+			retrySleep(retryDelay(attempt, nextRetryAfter, time.Now()))
 		}
+		nextRetryAfter = ""
 
 		req, err := http.NewRequest("GET", u, nil)
 		if err != nil {
@@ -467,6 +481,7 @@ func (c *Client) get(path string, params url.Values, result interface{}) error {
 			lastErr = fmt.Errorf("HTTP GET %s: %w", path, err)
 			continue
 		}
+		nextRetryAfter = resp.Header.Get("Retry-After")
 
 		respBody, truncated, err := readResponseBody(resp)
 		if err != nil {
@@ -500,6 +515,23 @@ func (c *Client) get(path string, params url.Values, result interface{}) error {
 	}
 
 	return fmt.Errorf("all retries failed: %w", lastErr)
+}
+
+func retryDelay(attempt int, retryAfter string, now time.Time) time.Duration {
+	delay := time.Duration(attempt) * time.Second
+	if seconds, err := strconv.Atoi(strings.TrimSpace(retryAfter)); err == nil && seconds >= 0 {
+		if serverDelay := time.Duration(seconds) * time.Second; serverDelay > delay {
+			delay = serverDelay
+		}
+	} else if retryAt, err := http.ParseTime(retryAfter); err == nil {
+		if serverDelay := retryAt.Sub(now); serverDelay > delay {
+			delay = serverDelay
+		}
+	}
+	if delay > maxRetryDelay {
+		return maxRetryDelay
+	}
+	return delay
 }
 
 func advancePage(currentPage, itemCount int) (next int, more bool, err error) {
