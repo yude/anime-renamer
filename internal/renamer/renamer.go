@@ -84,16 +84,11 @@ func BuildPath(originalPath string, result *matcher.MatchResult) (string, error)
 		return "", fmt.Errorf("incomplete match result")
 	}
 
-	// Episode number: use Number if available, otherwise use sort_number
-	epNum := 0
-	if result.Episode.Number != nil {
-		epNum = int(*result.Episode.Number)
-	} else {
-		epNum = result.Episode.SortNumber
-	}
-
-	if epNum <= 0 {
-		return "", fmt.Errorf("invalid episode number: %d", epNum)
+	// Episode number: use Number when it is a supported positive integer,
+	// otherwise use SortNumber only when Number is absent.
+	epNum, ok := matcher.EpisodeNumber(result.Episode)
+	if !ok {
+		return "", fmt.Errorf("invalid episode number")
 	}
 
 	// Build output path: <dir>/<WorkTitle>/<WorkTitle> #<N> 「<Subtitle>」.mp4
@@ -156,11 +151,7 @@ func Rename(originalPath string, result *matcher.MatchResult, dryRun bool, outpu
 
 	r.NewPath = newPath
 	r.WorkTitle = result.Work.Title
-	if result.Episode.Number != nil {
-		r.EpisodeNum = int(*result.Episode.Number)
-	} else {
-		r.EpisodeNum = result.Episode.SortNumber
-	}
+	r.EpisodeNum, _ = matcher.EpisodeNumber(result.Episode)
 	r.Subtitle = result.Episode.Title
 	if r.Subtitle == "" {
 		r.Subtitle = result.FileSubtitle

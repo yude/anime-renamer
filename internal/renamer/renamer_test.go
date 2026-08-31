@@ -82,6 +82,15 @@ func TestBuildPath(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:         "fractional episode number is rejected instead of truncated",
+			originalPath: "/recordings/test.mp4",
+			match: &matcher.MatchResult{
+				Work:    &annict.Work{ID: 1, Title: "作品"},
+				Episode: &annict.Episode{ID: 1, Number: float64Ptr(7.5), SortNumber: 7},
+			},
+			wantErr: true,
+		},
+		{
 			name:         "title and subtitle with filesystem-illegal characters",
 			originalPath: "/recordings/test.mp4",
 			match: &matcher.MatchResult{

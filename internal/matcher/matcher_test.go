@@ -352,6 +352,16 @@ func TestNarrowByEpisodeNumberFallsBackToSortNumber(t *testing.T) {
 	}
 }
 
+func TestFractionalEpisodeNumberDoesNotMatchIntegerInput(t *testing.T) {
+	episodes := []annict.Episode{{ID: 101, Number: float64Ptr(7.5), SortNumber: 7, Title: "特別話"}}
+	if got := findMatchingEpisode(7, "", episodes); got != nil {
+		t.Errorf("findMatchingEpisode() = %+v, want nil for fractional episode 7.5", got)
+	}
+	if number, ok := EpisodeNumber(&episodes[0]); ok || number != 0 {
+		t.Errorf("EpisodeNumber() = %d, %v; want 0, false for fractional number", number, ok)
+	}
+}
+
 func TestMatchMultipleWorksNarrowedByEpisodeSortNumber(t *testing.T) {
 	works := []annict.Work{
 		{ID: 1, Title: "作品A"},

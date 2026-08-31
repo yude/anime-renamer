@@ -2,6 +2,7 @@ package matcher
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -313,7 +314,7 @@ func narrowByEpisodeNumber(works []annict.Work, episodeNum int, episodesByWork m
 				// Find the max episode number in the base work
 				maxBaseEp := 0
 				for j := range baseEpisodes {
-					if n := episodeNumberOf(&baseEpisodes[j]); n > maxBaseEp {
+					if n, ok := EpisodeNumber(&baseEpisodes[j]); ok && n > maxBaseEp {
 						maxBaseEp = n
 					}
 				}
@@ -343,19 +344,34 @@ func workTitles(works []annict.Work) string {
 	return strings.Join(titles, ", ")
 }
 
-// episodeNumberOf returns an episode's effective number: its Number if set,
-// otherwise its SortNumber.
-func episodeNumberOf(e *annict.Episode) int {
-	if e.Number != nil {
-		return int(*e.Number)
+// EpisodeNumber returns the positive integer number that the CLI can safely
+// match and place in a filename. Annict represents Number as a float because
+// special episodes can use fractional values; those must not be truncated to
+// an unrelated integer episode. SortNumber is only a fallback when Number is
+// absent, not when it is present but unsupported.
+func EpisodeNumber(e *annict.Episode) (int, bool) {
+	if e == nil {
+		return 0, false
 	}
-	return e.SortNumber
+	if e.Number != nil {
+		number := *e.Number
+		if number <= 0 || math.Trunc(number) != number {
+			return 0, false
+		}
+		integer := int(number)
+		if integer <= 0 || float64(integer) != number {
+			return 0, false
+		}
+		return integer, true
+	}
+	return e.SortNumber, e.SortNumber > 0
 }
 
 // episodeNumberMatches reports whether an episode's effective number (its
 // Number if set, otherwise its SortNumber) equals the given number.
 func episodeNumberMatches(e *annict.Episode, number int) bool {
-	return episodeNumberOf(e) == number
+	episodeNumber, ok := EpisodeNumber(e)
+	return ok && episodeNumber == number
 }
 
 // findMatchingEpisode finds an episode matching the given number and subtitle.

@@ -231,12 +231,7 @@ func processFile(
 		fmt.Fprintf(os.Stderr, "  Annict detail:\n")
 		fmt.Fprintf(os.Stderr, "    Work:      %s (ID: %d, season: %s)\n", result.Work.Title, result.Work.ID, result.Work.SeasonName)
 		if result.Episode != nil {
-			epNum := 0
-			if result.Episode.Number != nil {
-				epNum = int(*result.Episode.Number)
-			} else {
-				epNum = result.Episode.SortNumber
-			}
+			epNum, _ := matcher.EpisodeNumber(result.Episode)
 			fmt.Fprintf(os.Stderr, "    Episode:   %d - %s (ID: %d)\n", epNum, result.Episode.Title, result.Episode.ID)
 		}
 		if result.Program != nil {
