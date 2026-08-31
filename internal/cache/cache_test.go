@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -109,6 +110,47 @@ func TestWorkExpiresAfterTTL(t *testing.T) {
 
 	if _, ok := c.GetWork("作品"); ok {
 		t.Error("GetWork() should miss once the entry is older than the TTL")
+	}
+}
+
+func TestWorkWithFutureTimestampIsRejected(t *testing.T) {
+	dir := t.TempDir()
+	c := New(dir)
+	entry := cacheEntry[annict.Work]{
+		Data:     annict.Work{ID: 1, Title: "未来の作品"},
+		CachedAt: time.Now().Add(time.Hour),
+	}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(c.workPath("未来の作品"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := c.GetWork("未来の作品"); ok {
+		t.Error("GetWork() should reject a cache entry timestamped in the future")
+	}
+}
+
+func TestOversizedWorkCacheIsRejected(t *testing.T) {
+	dir := t.TempDir()
+	c := New(dir)
+	path := c.workPath("巨大キャッシュ")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(maxCacheFileBytes + 1); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := c.GetWork("巨大キャッシュ"); ok {
+		t.Error("GetWork() should reject an oversized cache file")
 	}
 }
 

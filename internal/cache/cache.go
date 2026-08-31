@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -12,7 +13,10 @@ import (
 	"github.com/yude/anime-renamer/internal/annict"
 )
 
-const defaultTTL = 7 * 24 * time.Hour
+const (
+	defaultTTL        = 7 * 24 * time.Hour
+	maxCacheFileBytes = 8 << 20
+)
 
 // Cache provides JSON file-based caching for Annict API responses.
 type Cache struct {
@@ -64,13 +68,13 @@ func (c *Cache) GetWork(title string) (*annict.Work, bool) {
 	defer c.mu.RUnlock()
 
 	path := c.workPath(title)
-	data, err := os.ReadFile(path)
+	data, err := readCacheFile(path)
 	if err == nil {
 		var entry cacheEntry[annict.Work]
 		if err := json.Unmarshal(data, &entry); err != nil {
 			return nil, false
 		}
-		if time.Since(entry.CachedAt) > c.ttl {
+		if !cacheEntryFresh(entry.CachedAt, c.ttl) {
 			return nil, false
 		}
 		return &entry.Data, true
@@ -83,7 +87,7 @@ func (c *Cache) GetWork(title string) (*annict.Work, bool) {
 	// use one file per title to avoid repeatedly decoding and rewriting an
 	// ever-growing map and to prevent separate processes losing each
 	// other's updates.
-	data, err = os.ReadFile(filepath.Join(c.dir, "works.json"))
+	data, err = readCacheFile(filepath.Join(c.dir, "works.json"))
 	if err != nil {
 		return nil, false
 	}
@@ -97,7 +101,7 @@ func (c *Cache) GetWork(title string) (*annict.Work, bool) {
 		return nil, false
 	}
 
-	if time.Since(entry.CachedAt) > c.ttl {
+	if !cacheEntryFresh(entry.CachedAt, c.ttl) {
 		return nil, false
 	}
 
@@ -139,7 +143,7 @@ func (c *Cache) GetEpisodes(workID int) ([]annict.Episode, bool) {
 	defer c.mu.RUnlock()
 
 	path := filepath.Join(c.dir, fmt.Sprintf("episodes_%d.json", workID))
-	data, err := os.ReadFile(path)
+	data, err := readCacheFile(path)
 	if err != nil {
 		return nil, false
 	}
@@ -149,11 +153,33 @@ func (c *Cache) GetEpisodes(workID int) ([]annict.Episode, bool) {
 		return nil, false
 	}
 
-	if time.Since(entry.CachedAt) > c.ttl {
+	if !cacheEntryFresh(entry.CachedAt, c.ttl) {
 		return nil, false
 	}
 
 	return entry.Data, true
+}
+
+func cacheEntryFresh(cachedAt time.Time, ttl time.Duration) bool {
+	age := time.Since(cachedAt)
+	return age >= 0 && age <= ttl
+}
+
+func readCacheFile(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	data, err := io.ReadAll(io.LimitReader(f, maxCacheFileBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxCacheFileBytes {
+		return nil, fmt.Errorf("cache file exceeds %d bytes", maxCacheFileBytes)
+	}
+	return data, nil
 }
 
 // SetEpisodes caches episodes for a work ID.
@@ -188,6 +214,9 @@ func writeJSONAtomic(path string, value any) (err error) {
 	data, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal cache: %w", err)
+	}
+	if len(data) > maxCacheFileBytes {
+		return fmt.Errorf("cache entry exceeds %d bytes", maxCacheFileBytes)
 	}
 
 	dir := filepath.Dir(path)
