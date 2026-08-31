@@ -131,6 +131,17 @@ func TestCollectFiles_SingleFile(t *testing.T) {
 	}
 }
 
+func TestCollectFiles_RejectsUnsupportedSingleFile(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(file, []byte("not a recording"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := collectFiles(file, false); err == nil {
+		t.Error("collectFiles() should reject an unsupported explicit file")
+	}
+}
+
 func TestCollectFiles_RejectsExplicitSymlink(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("creating symlinks may require additional privileges on Windows")
@@ -245,6 +256,17 @@ func TestValidateConfidenceThreshold(t *testing.T) {
 	for _, value := range []int{-1, 101} {
 		if err := validateConfidenceThreshold(value); err == nil {
 			t.Errorf("validateConfidenceThreshold(%d) error = nil, want range error", value)
+		}
+	}
+}
+
+func TestValidateTargetArgs(t *testing.T) {
+	if err := validateTargetArgs([]string{"recordings"}); err != nil {
+		t.Errorf("validateTargetArgs() error = %v, want nil for one target", err)
+	}
+	for _, args := range [][]string{nil, {"one", "two"}} {
+		if err := validateTargetArgs(args); err == nil {
+			t.Errorf("validateTargetArgs(%v) error = nil, want argument-count error", args)
 		}
 	}
 }

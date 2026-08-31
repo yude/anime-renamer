@@ -41,7 +41,8 @@ func main() {
 	}
 	flag.Parse()
 
-	if flag.NArg() < 1 {
+	if err := validateTargetArgs(flag.Args()); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n\n", err)
 		flag.Usage()
 		os.Exit(1)
 	}
@@ -392,6 +393,9 @@ func collectFilesWithWalker(target string, recursive bool, walk walkDirFunc) ([]
 		if !info.Mode().IsRegular() {
 			return nil, fmt.Errorf("target is not a regular file: %s", target)
 		}
+		if !isSupportedRecordingExtension(target) {
+			return nil, fmt.Errorf("unsupported recording extension: %s", filepath.Ext(target))
+		}
 		return []string{target}, nil
 	}
 
@@ -448,6 +452,13 @@ func isSupportedRecordingExtension(path string) bool {
 	default:
 		return false
 	}
+}
+
+func validateTargetArgs(args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("expected exactly one file or directory, got %d", len(args))
+	}
+	return nil
 }
 
 func validateConfidenceThreshold(value int) error {
