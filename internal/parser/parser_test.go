@@ -5,6 +5,27 @@ import (
 	"time"
 )
 
+func TestKanjiToInt(t *testing.T) {
+	for _, tt := range []struct {
+		input string
+		want  int
+		ok    bool
+	}{
+		{input: "十七", want: 17, ok: true},
+		{input: "百二十三", want: 123, ok: true},
+		{input: "一〇〇", want: 100, ok: true},
+		{input: "二千二十四", want: 2024, ok: true},
+		{input: "十百", ok: false},
+		{input: "二三十", ok: false},
+		{input: "", ok: false},
+	} {
+		got, ok := kanjiToInt(tt.input)
+		if got != tt.want || ok != tt.ok {
+			t.Errorf("kanjiToInt(%q) = %d, %v; want %d, %v", tt.input, got, ok, tt.want, tt.ok)
+		}
+	}
+}
+
 func TestParseFilename(t *testing.T) {
 	jst := time.FixedZone("JST", 9*60*60)
 
@@ -157,6 +178,27 @@ func TestParseFilename(t *testing.T) {
 			wantTitle: "黄泉のツガイ",
 			wantEp:    17,
 			wantSub:   "泣く子と悪い子",
+		},
+		{
+			name:      "kanji episode with hundred unit",
+			input:     "長期作品 第百二十三話「百話超え」 (20260801).mp4",
+			wantTitle: "長期作品",
+			wantEp:    123,
+			wantSub:   "百話超え",
+		},
+		{
+			name:      "kanji episode written digit by digit",
+			input:     "長期作品 第一〇〇話「百話」 (20260801).mp4",
+			wantTitle: "長期作品",
+			wantEp:    100,
+			wantSub:   "百話",
+		},
+		{
+			name:      "kanji episode with thousand unit",
+			input:     "長期作品 第千百一話「千話超え」 (20260801).mp4",
+			wantTitle: "長期作品",
+			wantEp:    1101,
+			wantSub:   "千話超え",
 		},
 		{
 			name:      "kanji episode with 幕 suffix",

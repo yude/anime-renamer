@@ -50,11 +50,25 @@ var (
 	}
 )
 
-// kanjiDigits maps single kanji digits to their integer values.
+// kanjiDigits maps single kanji digits to their integer values. Multipliers
+// such as 十, 百, and 千 are handled separately by kanjiUnit.
 var kanjiDigits = map[rune]int{
 	'〇': 0,
 	'一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
-	'六': 6, '七': 7, '八': 8, '九': 9, '十': 10,
+	'六': 6, '七': 7, '八': 8, '九': 9,
+}
+
+func kanjiUnit(r rune) (int, bool) {
+	switch r {
+	case '十':
+		return 10, true
+	case '百':
+		return 100, true
+	case '千':
+		return 1000, true
+	default:
+		return 0, false
+	}
 }
 
 // kanjiToInt converts a kanji numeral string to an integer.
@@ -65,43 +79,50 @@ func kanjiToInt(s string) (int, bool) {
 	}
 
 	result := 0
-	current := 0
-	hasKanji := false
+	decimal := 0
+	currentDigit := -1
+	digitsBeforeFirstUnit := 0
+	lastUnit := 10000
+	hasUnit := false
 
 	for _, r := range s {
-		v, ok := kanjiDigits[r]
-		if !ok {
+		if digit, ok := kanjiDigits[r]; ok {
+			if hasUnit && currentDigit >= 0 {
+				return 0, false
+			}
+			decimal = decimal*10 + digit
+			currentDigit = digit
+			if !hasUnit {
+				digitsBeforeFirstUnit++
+			}
+			continue
+		}
+
+		unit, ok := kanjiUnit(r)
+		if !ok || unit >= lastUnit {
 			return 0, false
 		}
-		hasKanji = true
-
-		switch r {
-		case '十':
-			if current == 0 {
-				current = 1
-			}
-			result += current * 10
-			current = 0
-		case '百':
-			if current == 0 {
-				current = 1
-			}
-			result += current * 100
-			current = 0
-		case '千':
-			if current == 0 {
-				current = 1
-			}
-			result += current * 1000
-			current = 0
-		default:
-			current = v
+		if !hasUnit && digitsBeforeFirstUnit > 1 {
+			return 0, false
 		}
+		hasUnit = true
+		lastUnit = unit
+		multiplier := currentDigit
+		if multiplier < 0 {
+			multiplier = 1
+		}
+		if multiplier == 0 {
+			return 0, false
+		}
+		result += multiplier * unit
+		currentDigit = -1
 	}
-	result += current
 
-	if !hasKanji {
-		return 0, false
+	if !hasUnit {
+		return decimal, true
+	}
+	if currentDigit >= 0 {
+		result += currentDigit
 	}
 	return result, true
 }
