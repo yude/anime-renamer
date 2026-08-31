@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode"
 
 	"github.com/yude/anime-renamer/internal/matcher"
 )
@@ -26,6 +27,44 @@ var pathSanitizer = strings.NewReplacer(
 	">", "＞",
 	"|", "｜",
 )
+
+// sanitizePathComponent makes API-provided text safe to use as exactly one
+// path component on every supported OS. In addition to path separators,
+// Windows rejects ASCII control characters, trailing spaces/dots, and device
+// names such as CON even when they have an extension.
+func sanitizePathComponent(s string) string {
+	s = pathSanitizer.Replace(s)
+	s = strings.Map(func(r rune) rune {
+		if r < ' ' || r == 0x7f {
+			return ' '
+		}
+		return r
+	}, s)
+	s = strings.TrimSpace(s)
+	s = strings.TrimRightFunc(s, func(r rune) bool {
+		return r == '.' || unicode.IsSpace(r)
+	})
+
+	if isWindowsReservedName(s) {
+		s = "＿" + s
+	}
+	return s
+}
+
+func isWindowsReservedName(s string) bool {
+	base := s
+	if before, _, ok := strings.Cut(base, "."); ok {
+		base = before
+	}
+	base = strings.ToUpper(strings.TrimSpace(base))
+	if base == "CON" || base == "PRN" || base == "AUX" || base == "NUL" {
+		return true
+	}
+	if len(base) == 4 && (strings.HasPrefix(base, "COM") || strings.HasPrefix(base, "LPT")) {
+		return base[3] >= '1' && base[3] <= '9'
+	}
+	return false
+}
 
 // RenameResult holds the result of a rename operation.
 type RenameResult struct {
@@ -58,7 +97,10 @@ func BuildPath(originalPath string, result *matcher.MatchResult) (string, error)
 	}
 
 	// Build output path: <dir>/<WorkTitle>/<WorkTitle> #<N> 「<Subtitle>」.mp4
-	workTitle := pathSanitizer.Replace(result.Work.Title)
+	workTitle := sanitizePathComponent(result.Work.Title)
+	if workTitle == "" {
+		return "", fmt.Errorf("work title is empty after path sanitization")
+	}
 	dir := filepath.Dir(originalPath)
 	workDir := filepath.Join(dir, workTitle)
 
@@ -67,7 +109,7 @@ func BuildPath(originalPath string, result *matcher.MatchResult) (string, error)
 	if subtitle == "" {
 		subtitle = result.FileSubtitle
 	}
-	subtitle = pathSanitizer.Replace(subtitle)
+	subtitle = sanitizePathComponent(subtitle)
 
 	// Renaming does not transcode the recording, so preserve its container
 	// extension. Keep the historical .mp4 fallback for extensionless paths.

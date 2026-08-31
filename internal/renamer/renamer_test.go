@@ -92,6 +92,33 @@ func TestBuildPath(t *testing.T) {
 			// and ":" "?" are rejected in file names on Windows.
 			wantPath: "/recordings/作品／2/作品／2 #1 「A：B？」.mp4",
 		},
+		{
+			name:         "path traversal title is rejected",
+			originalPath: "/recordings/test.mp4",
+			match: &matcher.MatchResult{
+				Work:    &annict.Work{ID: 1, Title: ".."},
+				Episode: &annict.Episode{ID: 1, Number: float64Ptr(1)},
+			},
+			wantErr: true,
+		},
+		{
+			name:         "Windows reserved directory name is prefixed",
+			originalPath: "/recordings/test.mp4",
+			match: &matcher.MatchResult{
+				Work:    &annict.Work{ID: 1, Title: "CON.txt"},
+				Episode: &annict.Episode{ID: 1, Number: float64Ptr(1)},
+			},
+			wantPath: "/recordings/＿CON.txt/＿CON.txt #1.mp4",
+		},
+		{
+			name:         "control characters and trailing dots are sanitized",
+			originalPath: "/recordings/test.mp4",
+			match: &matcher.MatchResult{
+				Work:    &annict.Work{ID: 1, Title: "作品. "},
+				Episode: &annict.Episode{ID: 1, Number: float64Ptr(1), Title: "前編\n後編"},
+			},
+			wantPath: "/recordings/作品/作品 #1 「前編 後編」.mp4",
+		},
 	}
 
 	for _, tt := range tests {
