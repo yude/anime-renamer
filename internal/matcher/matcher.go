@@ -209,7 +209,7 @@ func Match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 			if program != nil {
 				result.Program = program
 				result.Confidence += 10
-				result.Reasons = append(result.Reasons, "program date match")
+				result.Reasons = append(result.Reasons, "program schedule match")
 			} else {
 				result.Reasons = append(result.Reasons, "no program found matching recording date")
 			}
@@ -416,12 +416,14 @@ func findMatchingProgram(date time.Time, episodeID int, programs []annict.Progra
 		p := &programs[i]
 		score := 0
 
-		// Zero is not a real Annict ID (used as the zero-value placeholder
-		// when a program has no linked episode, or when an episode ID
-		// couldn't be determined), so treat it as "unknown" rather than a
-		// value that can match — otherwise two unrelated zero IDs would
-		// spuriously "match" each other.
-		if episodeID > 0 && p.Episode.ID == episodeID {
+		// When the expected episode is known, a schedule entry linked to a
+		// different (or missing) episode cannot verify the match merely by
+		// airing on the same date. This matters for works with multiple
+		// broadcasts in the fetched date window.
+		if episodeID > 0 && p.Episode.ID != episodeID {
+			continue
+		}
+		if episodeID > 0 {
 			score += 10
 		}
 

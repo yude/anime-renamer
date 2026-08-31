@@ -585,6 +585,24 @@ func TestFindMatchingProgram(t *testing.T) {
 			t.Errorf("findMatchingProgram() = %+v, want program ID 1 matched by date", got)
 		}
 	})
+
+	t.Run("known different episode does not match by date alone", func(t *testing.T) {
+		programs := []annict.Program{
+			{ID: 1, StartedAt: date, Episode: annict.Episode{ID: 41}},
+		}
+		if got := findMatchingProgram(date, 42, programs); got != nil {
+			t.Errorf("findMatchingProgram() = %+v, want nil for a different linked episode", got)
+		}
+	})
+
+	t.Run("missing linked episode does not verify a known episode", func(t *testing.T) {
+		programs := []annict.Program{
+			{ID: 1, StartedAt: date, Episode: annict.Episode{ID: 0}},
+		}
+		if got := findMatchingProgram(date, 42, programs); got != nil {
+			t.Errorf("findMatchingProgram() = %+v, want nil when the expected episode is known but the program link is missing", got)
+		}
+	})
 }
 
 func float64Ptr(f float64) *float64 {
