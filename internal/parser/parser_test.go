@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -22,6 +23,18 @@ func TestKanjiToInt(t *testing.T) {
 		got, ok := kanjiToInt(tt.input)
 		if got != tt.want || ok != tt.ok {
 			t.Errorf("kanjiToInt(%q) = %d, %v; want %d, %v", tt.input, got, ok, tt.want, tt.ok)
+		}
+	}
+}
+
+func TestParseFilenameAmbiguousEpisodeError(t *testing.T) {
+	for _, input := range []string{
+		"作品 #05.5「総集編」.mp4",
+		"作品 #01,02「第一話 ／ 第二話」.mp4",
+		"作品 10話／11話.mp4",
+	} {
+		if _, err := ParseFilename(input); !errors.Is(err, ErrAmbiguousEpisode) {
+			t.Errorf("ParseFilename(%q) error = %v, want ErrAmbiguousEpisode", input, err)
 		}
 	}
 }
@@ -504,6 +517,138 @@ func TestParseFilename(t *testing.T) {
 			wantSub:   "タイトル",
 		},
 
+		// === Recorder corpus formats ===
+		{
+			name:      "underscore date with single digit fields",
+			input:     "作品 第7話「タイトル」 (2021_6_5).mp4",
+			wantTitle: "作品",
+			wantEp:    7,
+			wantSub:   "タイトル",
+			wantDate:  time.Date(2021, 6, 5, 0, 0, 0, 0, jst),
+		},
+		{
+			name:      "date followed by duplicate suffix",
+			input:     "作品 第7話「タイトル」 (20260801)(2).mp4",
+			wantTitle: "作品",
+			wantEp:    7,
+			wantSub:   "タイトル",
+			wantDate:  time.Date(2026, 8, 1, 0, 0, 0, 0, jst),
+		},
+		{
+			name:      "underscore date followed by dash duplicate suffix",
+			input:     "作品 第7話「タイトル」 (2026_8_1)-3.mp4",
+			wantTitle: "作品",
+			wantEp:    7,
+			wantSub:   "タイトル",
+			wantDate:  time.Date(2026, 8, 1, 0, 0, 0, 0, jst),
+		},
+		{
+			name:      "episode word",
+			input:     "Extreme Hearts EPISODE 12 (2022_09_25).mp4",
+			wantTitle: "Extreme Hearts",
+			wantEp:    12,
+			wantDate:  time.Date(2022, 9, 25, 0, 0, 0, 0, jst),
+		},
+		{
+			name:      "earliest marker wins over episode word in subtitle",
+			input:     "涼宮ハルヒの憂鬱 #01 「朝比奈ミクルの冒険 Episode 00」.mp4",
+			wantTitle: "涼宮ハルヒの憂鬱",
+			wantEp:    1,
+			wantSub:   "朝比奈ミクルの冒険 Episode 00",
+		},
+		{
+			name:      "chapter word",
+			input:     "NieR：Automata Ver1.1a Chapter.10 (20230723).mp4",
+			wantTitle: "NieR：Automata Ver1.1a",
+			wantEp:    10,
+			wantDate:  time.Date(2023, 7, 23, 0, 0, 0, 0, jst),
+		},
+		{
+			name:      "fullwidth track word",
+			input:     "ＳＨＯＷ ＢＹ ＲＯＣＫ！！ ｔｒａｃｋ－３ (2020_1_22).mp4",
+			wantTitle: "ＳＨＯＷ ＢＹ ＲＯＣＫ！！",
+			wantEp:    3,
+			wantDate:  time.Date(2020, 1, 22, 0, 0, 0, 0, jst),
+		},
+		{
+			name:      "musical sharp sign",
+			input:     "ウィッチウォッチ ♯10 (20250608).mp4",
+			wantTitle: "ウィッチウォッチ",
+			wantEp:    10,
+		},
+		{
+			name:      "bare episode number",
+			input:     "作品 10話「タイトル」 (20250609).mp4",
+			wantTitle: "作品",
+			wantEp:    10,
+			wantSub:   "タイトル",
+		},
+		{
+			name:      "night episode unit",
+			input:     "月が導く異世界道中 第十二夜「月が導く…」 (2021_09_23).mp4",
+			wantTitle: "月が導く異世界道中",
+			wantEp:    12,
+			wantSub:   "月が導く…",
+		},
+		{
+			name:      "round episode unit",
+			input:     "ワンダーエッグ・プライオリティ 第１２回 (2021_04_01).mp4",
+			wantTitle: "ワンダーエッグ・プライオリティ",
+			wantEp:    12,
+		},
+		{
+			name:      "game episode unit",
+			input:     "咲-Saki- 阿知賀編 episode of side-A 第６局「奪回」 (2022_10_27).mp4",
+			wantTitle: "咲-Saki- 阿知賀編 episode of side-A",
+			wantEp:    6,
+			wantSub:   "奪回",
+		},
+		{
+			name:      "circled step episode",
+			input:     "Do It Yourself!! -どぅー・いっと・ゆあせるふ- 【すてっぷ①】 (2022_10_06).mp4",
+			wantTitle: "Do It Yourself!! -どぅー・いっと・ゆあせるふ-",
+			wantEp:    1,
+		},
+		{
+			name:      "embedded final tag before episode",
+			input:     "作品[終]第12話「最終話」 (2021_06_26).mp4",
+			wantTitle: "作品",
+			wantEp:    12,
+			wantSub:   "最終話",
+		},
+		{
+			name:      "bracketed title followed by final tag",
+			input:     "【推しの子】[終]#35 (20260326).mp4",
+			wantTitle: "【推しの子】",
+			wantEp:    35,
+		},
+		{
+			name:      "embedded broadcast slot tag",
+			input:     "4人はそれぞれウソをつく 【ＡＮｉＭＡＺｉＮＧ！！！】 ＃１「4人のヒミツ」 (2022_10_16).mp4",
+			wantTitle: "4人はそれぞれウソをつく",
+			wantEp:    1,
+			wantSub:   "4人のヒミツ",
+		},
+		{
+			name:      "generic anime EPG prefix",
+			input:     "アニメ　Ａｎｇｅｌ　Ｂｅａｔｓ！　第７話「Ａｌｉｖｅ」 (2019_11_19).mp4",
+			wantTitle: "Ａｎｇｅｌ Ｂｅａｔｓ！",
+			wantEp:    7,
+			wantSub:   "Ａｌｉｖｅ",
+		},
+		{
+			name:      "TV anime quoted EPG title",
+			input:     "TVアニメ『CITY THE ANIMATION』 #10 (20250908).mp4",
+			wantTitle: "CITY THE ANIMATION",
+			wantEp:    10,
+		},
+		{
+			name:      "recap phrase is not a single episode",
+			input:     "作品 9話までを振り返りスペシャル (20250101).mp4",
+			wantTitle: "作品 9話までを振り返りスペシャル",
+			wantEp:    0,
+		},
+
 		// === Error cases ===
 		{
 			name:    "empty filename",
@@ -528,6 +673,26 @@ func TestParseFilename(t *testing.T) {
 		{
 			name:    "overflowing episode number",
 			input:   "作品 ep.999999999999999999999999999999 (20260801).mp4",
+			wantErr: true,
+		},
+		{
+			name:    "fractional hash episode is rejected",
+			input:   "作品 #05.5「総集編」.mp4",
+			wantErr: true,
+		},
+		{
+			name:    "fractional numbered episode is rejected",
+			input:   "作品 第6．5話「総集編」.mp4",
+			wantErr: true,
+		},
+		{
+			name:    "multiple hash episodes are rejected",
+			input:   "作品 #01,02「第一話 ／ 第二話」.mp4",
+			wantErr: true,
+		},
+		{
+			name:    "bare episode range is rejected",
+			input:   "作品 10話／11話.mp4",
 			wantErr: true,
 		},
 	}
