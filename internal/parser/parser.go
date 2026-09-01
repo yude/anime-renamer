@@ -34,12 +34,16 @@ var (
 	// 第三話, 第五幕, 第四番, 第十七話, 第三怪 (kanji digits)
 	kanjiEpisodePattern = regexp.MustCompile(`第([〇一二三四五六七八九十百千]+)([話幕番怪])`)
 
+	leadingBracketTagPattern = regexp.MustCompile(`^[\s]*【[^】]*】`)
+	leadingAngleTagPattern   = regexp.MustCompile(`^[\s]*＜[^＞]*＞`)
+	seasonQualifierPattern   = regexp.MustCompile(`^(?:第\d+(?:期|クール)[\s\x{3000}]*)+`)
+
 	// Metadata tag patterns to strip from filenames (SCRename rp1 equivalent).
 	metadataTagPatterns = []*regexp.Regexp{
 		// Full-width bracket metadata at start: 【ANiMAZiNG!!!】, 【字幕】etc.
-		regexp.MustCompile(`^[\s]*【[^】]*】`),
+		leadingBracketTagPattern,
 		// Angle bracket metadata at start: ＜アニメギルド＞
-		regexp.MustCompile(`^[\s]*＜[^＞]*＞`),
+		leadingAngleTagPattern,
 		// Single-character bracket tags: [字], [新], [再], [無], [多], [SS], [解], [終]
 		regexp.MustCompile(`^[\s]*(?:\[字\]|\[新\]|\[再\]|\[無\]|\[多\]|\[SS\]|\[解\]|\[終\])`),
 		// Common recording prefixes at start
@@ -243,8 +247,22 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 // Applied iteratively until no more tags are found.
 func StripMetadataTags(s string) string {
 	for {
+		// regexp's \s is ASCII-only. Normalize leading Unicode whitespace
+		// before every pass so a full-width space cannot hide a real tag.
+		s = strings.TrimSpace(s)
 		changed := false
 		for _, re := range metadataTagPatterns {
+			match := re.FindStringIndex(s)
+			if match == nil {
+				continue
+			}
+			// Bracket forms are also used by real work titles such as
+			// 【推しの子】. If the text after the bracket starts directly with
+			// episode metadata (optionally after a season qualifier), the
+			// bracketed component is the title rather than a broadcast tag.
+			if isPotentialTitleTag(re) && startsWithEpisodeMetadata(s[match[1]:]) {
+				continue
+			}
 			newS := re.ReplaceAllString(s, "")
 			if newS != s {
 				changed = true
@@ -256,4 +274,21 @@ func StripMetadataTags(s string) string {
 		}
 	}
 	return strings.TrimSpace(s)
+}
+
+func isPotentialTitleTag(re *regexp.Regexp) bool {
+	return re == leadingBracketTagPattern || re == leadingAngleTagPattern
+}
+
+func startsWithEpisodeMetadata(s string) bool {
+	s = strings.TrimSpace(s)
+	if qualifier := seasonQualifierPattern.FindString(s); qualifier != "" {
+		s = strings.TrimSpace(s[len(qualifier):])
+	}
+	for _, re := range []*regexp.Regexp{epPattern1, epPattern2, arabicEpisodePattern, kanjiEpisodePattern} {
+		if match := re.FindStringIndex(s); match != nil && match[0] == 0 {
+			return true
+		}
+	}
+	return false
 }
