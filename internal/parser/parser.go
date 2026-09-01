@@ -19,24 +19,24 @@ type RecordingMetadata struct {
 }
 
 var (
-	// Matches date in parentheses at end: (YYYYMMDD)
-	datePattern = regexp.MustCompile(`\((\d{8})\)\s*$`)
+	// Matches date in half- or full-width parentheses at end: (YYYYMMDD)
+	datePattern = regexp.MustCompile(`[（(]([0-9０-９]{8})[）)]\s*$`)
 
 	// Episode patterns matching both full-width and half-width forms.
 	// These run against the ORIGINAL string (pre-normalization).
 	// ep.7, ep．7, EP.7, EP．7, ep 7, ep. 7, ep7, ep\u30007
-	epPattern1 = regexp.MustCompile(`(?i)ep[.．\s\x{3000}]*(\d+)`)
+	epPattern1 = regexp.MustCompile(`[eEｅＥ][pPｐＰ][.．\s\x{3000}]*([0-9０-９]+)`)
 	// #7, #07
-	epPattern2 = regexp.MustCompile(`#(\d+)`)
+	epPattern2 = regexp.MustCompile(`[#＃]([0-9０-９]+)`)
 
 	// 第N話, 第N幕, 第N番, 第N怪 (arabic digits, suffix required to avoid 第2クール false positive)
-	arabicEpisodePattern = regexp.MustCompile(`第(\d+)([話幕番怪])`)
+	arabicEpisodePattern = regexp.MustCompile(`第([0-9０-９]+)([話幕番怪])`)
 	// 第三話, 第五幕, 第四番, 第十七話, 第三怪 (kanji digits)
 	kanjiEpisodePattern = regexp.MustCompile(`第([〇一二三四五六七八九十百千]+)([話幕番怪])`)
 
 	leadingBracketTagPattern = regexp.MustCompile(`^[\s]*【[^】]*】`)
 	leadingAngleTagPattern   = regexp.MustCompile(`^[\s]*＜[^＞]*＞`)
-	seasonQualifierPattern   = regexp.MustCompile(`^(?:第\d+(?:期|クール)[\s\x{3000}]*)+`)
+	seasonQualifierPattern   = regexp.MustCompile(`^(?:第[0-9０-９]+(?:期|クール)[\s\x{3000}]*)+`)
 
 	// Metadata tag patterns to strip from filenames (SCRename rp1 equivalent).
 	metadataTagPatterns = []*regexp.Regexp{
@@ -131,6 +131,17 @@ func kanjiToInt(s string) (int, bool) {
 	return result, true
 }
 
+func decimalEpisodeNumber(s string) (int, error) {
+	number, err := strconv.Atoi(normalize.Normalize(s))
+	if err != nil {
+		return 0, err
+	}
+	if number <= 0 {
+		return 0, fmt.Errorf("must be positive")
+	}
+	return number, nil
+}
+
 // ParseFilename parses a recording filename and extracts metadata.
 // Expected format:
 //
@@ -151,9 +162,10 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 	// 2. Extract date from end
 	var recordedDate time.Time
 	if m := datePattern.FindStringSubmatch(name); m != nil {
-		d, err := time.ParseInLocation("20060102", m[1], time.FixedZone("JST", 9*60*60))
+		digits := normalize.Normalize(m[1])
+		d, err := time.ParseInLocation("20060102", digits, time.FixedZone("JST", 9*60*60))
 		if err != nil {
-			return nil, fmt.Errorf("invalid date %q: %w", m[1], err)
+			return nil, fmt.Errorf("invalid date %q: %w", digits, err)
 		}
 		recordedDate = d
 		name = strings.TrimSpace(name[:len(name)-len(m[0])])
@@ -177,24 +189,38 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 
 	// Try patterns in priority order
 	if m := epPattern1.FindStringSubmatchIndex(name); m != nil {
-		episodeNumber, _ = strconv.Atoi(name[m[2]:m[3]])
+		parsedNumber, err := decimalEpisodeNumber(name[m[2]:m[3]])
+		if err != nil {
+			return nil, fmt.Errorf("invalid episode number %q: %w", name[m[2]:m[3]], err)
+		}
+		episodeNumber = parsedNumber
 		epStart = m[0]
 		epEnd = m[1]
 	} else if m := epPattern2.FindStringSubmatchIndex(name); m != nil {
-		episodeNumber, _ = strconv.Atoi(name[m[2]:m[3]])
+		parsedNumber, err := decimalEpisodeNumber(name[m[2]:m[3]])
+		if err != nil {
+			return nil, fmt.Errorf("invalid episode number %q: %w", name[m[2]:m[3]], err)
+		}
+		episodeNumber = parsedNumber
 		epStart = m[0]
 		epEnd = m[1]
 	} else if m := arabicEpisodePattern.FindStringSubmatchIndex(name); m != nil {
-		episodeNumber, _ = strconv.Atoi(name[m[2]:m[3]])
+		parsedNumber, err := decimalEpisodeNumber(name[m[2]:m[3]])
+		if err != nil {
+			return nil, fmt.Errorf("invalid episode number %q: %w", name[m[2]:m[3]], err)
+		}
+		episodeNumber = parsedNumber
 		epStart = m[0]
 		epEnd = m[1]
 	} else if m := kanjiEpisodePattern.FindStringSubmatchIndex(name); m != nil {
 		kanjiNum := name[m[2]:m[3]]
-		if v, ok := kanjiToInt(kanjiNum); ok {
-			episodeNumber = v
-			epStart = m[0]
-			epEnd = m[1]
+		v, ok := kanjiToInt(kanjiNum)
+		if !ok || v <= 0 {
+			return nil, fmt.Errorf("invalid episode number %q", kanjiNum)
 		}
+		episodeNumber = v
+		epStart = m[0]
+		epEnd = m[1]
 	}
 
 	// 5. Extract subtitle from 「...」 AFTER episode marker (not before)

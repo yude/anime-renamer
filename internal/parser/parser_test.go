@@ -138,6 +138,27 @@ func TestParseFilename(t *testing.T) {
 			wantSub:   "タイトル",
 		},
 		{
+			name:      "full-width EP and episode digits",
+			input:     "作品 ＥＰ．７「タイトル」 (20260801).mp4",
+			wantTitle: "作品",
+			wantEp:    7,
+			wantSub:   "タイトル",
+		},
+		{
+			name:      "full-width hash and episode digits",
+			input:     "作品 ＃３「タイトル」 (20260801).mp4",
+			wantTitle: "作品",
+			wantEp:    3,
+			wantSub:   "タイトル",
+		},
+		{
+			name:      "dan notation with full-width digits",
+			input:     "作品 第７話「タイトル」 (20260801).mp4",
+			wantTitle: "作品",
+			wantEp:    7,
+			wantSub:   "タイトル",
+		},
+		{
 			name:      "hash without space",
 			input:     "作品#3「タイトル」 (20260801).mp4",
 			wantTitle: "作品",
@@ -408,6 +429,14 @@ func TestParseFilename(t *testing.T) {
 			wantSub:   "タイトル",
 		},
 		{
+			name:      "full-width date digits and parentheses",
+			input:     "作品 ep.7「タイトル」 （２０２６０８０１）.mp4",
+			wantTitle: "作品",
+			wantEp:    7,
+			wantSub:   "タイトル",
+			wantDate:  time.Date(2026, 8, 1, 0, 0, 0, 0, jst),
+		},
+		{
 			name:      "date without parentheses stays in work title",
 			input:     "20260801 作品 ep.7「タイトル」.mp4",
 			wantTitle: "20260801 作品",
@@ -489,6 +518,16 @@ func TestParseFilename(t *testing.T) {
 		{
 			name:    "no recognizable content",
 			input:   "......mp4",
+			wantErr: true,
+		},
+		{
+			name:    "zero episode number",
+			input:   "作品 #0 (20260801).mp4",
+			wantErr: true,
+		},
+		{
+			name:    "overflowing episode number",
+			input:   "作品 ep.999999999999999999999999999999 (20260801).mp4",
 			wantErr: true,
 		},
 	}
