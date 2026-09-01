@@ -281,10 +281,14 @@ func searchWork(client *annict.Client, c *cache.Cache, title string, wc map[stri
 	}
 
 	// Check persistent disk cache (only ever stores unambiguous matches).
+	// Revalidate the title so a stale cache entry produced by an older matching
+	// rule cannot suppress a fresh API search for its full TTL.
 	if cached, ok := c.GetWork(title); ok {
-		works := []annict.Work{*cached}
-		wc[title] = works
-		return works, nil
+		works := matcher.MatchingWorks(title, []annict.Work{*cached})
+		if len(works) > 0 {
+			wc[title] = works
+			return works, nil
+		}
 	}
 
 	// Search Annict
@@ -292,6 +296,11 @@ func searchWork(client *annict.Client, c *cache.Cache, title string, wc map[stri
 	if err != nil {
 		return nil, err
 	}
+
+	// Annict search is intentionally fuzzy. Match uses stricter normalized
+	// exact/substring rules, so filter by those same rules before fetching and
+	// caching episodes for every raw search result.
+	works = matcher.MatchingWorks(title, works)
 
 	wc[title] = works
 	if len(works) == 1 {

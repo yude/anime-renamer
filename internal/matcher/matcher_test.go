@@ -395,7 +395,7 @@ func TestMatchMultiCourOffsetFindsCorrectEpisode(t *testing.T) {
 	// (which restarts at 1), not the original absolute number.
 	//
 	// Both works must land in candidateWorks together for this heuristic to
-	// even run: findMatchingWorks only falls back to substring matching when
+	// even run: MatchingWorks only falls back to substring matching when
 	// NO candidate is an exact title match, so the parsed title here is a
 	// strict substring of both work titles rather than equal to either.
 	baseEpisodes := make([]annict.Episode, 12)

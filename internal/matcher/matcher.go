@@ -56,7 +56,7 @@ func Match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 	}
 
 	// Step 1: Find matching works
-	candidateWorks := findMatchingWorks(meta.WorkTitle, works)
+	candidateWorks := MatchingWorks(meta.WorkTitle, works)
 	if len(candidateWorks) == 0 {
 		return nil
 	}
@@ -219,8 +219,10 @@ func Match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 	return result
 }
 
-// findMatchingWorks finds works matching the given title.
-func findMatchingWorks(title string, works []annict.Work) []annict.Work {
+// MatchingWorks returns the Annict works that can match the given parsed
+// title. Callers may use it before fetching episodes so fuzzy API results that
+// Match would reject do not trigger unnecessary follow-up requests.
+func MatchingWorks(title string, works []annict.Work) []annict.Work {
 	var matches []annict.Work
 	normalized := normalize.NormalizeForSearch(title)
 

@@ -349,6 +349,58 @@ func TestGetProgramsCachesPerDateNotJustPerWork(t *testing.T) {
 	}
 }
 
+func TestProcessFileSkipsEpisodesForUnrelatedSearchResults(t *testing.T) {
+	var episodeWorkIDs []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/graphql":
+			// An empty GraphQL result exercises the REST fuzzy-search fallback.
+			fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[]}}}`)
+		case "/works":
+			fmt.Fprint(w, `{"works":[
+				{"id":1,"title":"作品","episodes_count":1},
+				{"id":2,"title":"無関係な番組","episodes_count":1}
+			]}`)
+		case "/episodes":
+			workID := r.URL.Query().Get("filter_work_id")
+			episodeWorkIDs = append(episodeWorkIDs, workID)
+			if workID != "1" {
+				t.Errorf("requested episodes for unrelated work %q", workID)
+			}
+			fmt.Fprint(w, `{"episodes":[{"id":101,"number":1,"sort_number":1,"title":"第一話"}]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "作品 第1話「第一話」 (20260801).mp4")
+	if err := os.WriteFile(file, []byte("recording"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	client := annict.NewClientWithURLs("token", server.URL, server.URL+"/graphql")
+	result := processFile(
+		file,
+		client,
+		cache.NewDisabled(filepath.Join(dir, "cache")),
+		make(map[string][]annict.Work),
+		make(map[int][]annict.Episode),
+		make(map[programsCacheKey][]annict.Program),
+		true,
+		false,
+		matcher.AutoRenameThreshold,
+		"",
+	)
+	if result.Error != nil {
+		t.Fatalf("processFile() error = %v", result.Error)
+	}
+	if len(episodeWorkIDs) != 1 || episodeWorkIDs[0] != "1" {
+		t.Errorf("episode API work IDs = %v, want only matching work [1]", episodeWorkIDs)
+	}
+}
+
 func TestProcessFileFetchesProgramsOnlyForSelectedWork(t *testing.T) {
 	var programWorkIDs []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
