@@ -142,6 +142,21 @@ func TestCollectFiles_RejectsUnsupportedSingleFile(t *testing.T) {
 	}
 }
 
+func TestCollectFiles_AcceptsM2TSRecording(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "recording.m2ts")
+	if err := os.WriteFile(file, []byte("recording"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := collectFiles(file, false)
+	if err != nil {
+		t.Fatalf("collectFiles() error = %v", err)
+	}
+	if len(files) != 1 || files[0] != file {
+		t.Errorf("collectFiles() = %v, want [%s]", files, file)
+	}
+}
+
 func TestCollectFiles_RejectsExplicitSymlink(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("creating symlinks may require additional privileges on Windows")

@@ -454,7 +454,7 @@ func collectFilesWithWalker(target string, recursive bool, walk walkDirFunc) ([]
 
 func isSupportedRecordingExtension(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
-	case ".mp4", ".ts", ".mkv", ".m4v":
+	case ".mp4", ".ts", ".mkv", ".m4v", ".m2ts":
 		return true
 	default:
 		return false
