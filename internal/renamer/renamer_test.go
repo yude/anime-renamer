@@ -185,6 +185,46 @@ func TestRenameDryRun(t *testing.T) {
 	}
 }
 
+func TestRenameRejectsInvalidSourceState(t *testing.T) {
+	t.Run("nil match returns an error instead of panicking", func(t *testing.T) {
+		r := Rename(filepath.Join(t.TempDir(), "test.mp4"), nil, true, "")
+		if r.Error == nil {
+			t.Fatal("Rename() with nil match should return an error")
+		}
+	})
+
+	result := &matcher.MatchResult{
+		Work:    &annict.Work{ID: 1, Title: "作品"},
+		Episode: &annict.Episode{ID: 1, Number: float64Ptr(1), Title: "第一話"},
+	}
+
+	t.Run("dry-run rejects a missing source", func(t *testing.T) {
+		r := Rename(filepath.Join(t.TempDir(), "missing.mp4"), result, true, "")
+		if r.Error == nil {
+			t.Fatal("Rename(dry-run) should reject a missing source")
+		}
+	})
+
+	t.Run("dry-run rejects a symlink source", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("creating symlinks may require additional privileges on Windows")
+		}
+		dir := t.TempDir()
+		realPath := filepath.Join(dir, "real.mp4")
+		linkPath := filepath.Join(dir, "link.mp4")
+		if err := os.WriteFile(realPath, []byte("recording"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(realPath, linkPath); err != nil {
+			t.Fatal(err)
+		}
+		r := Rename(linkPath, result, true, "")
+		if r.Error == nil {
+			t.Fatal("Rename(dry-run) should reject a symlink source")
+		}
+	})
+}
+
 func TestRenameActual(t *testing.T) {
 	dir := t.TempDir()
 	src := filepath.Join(dir, "test.mp4")

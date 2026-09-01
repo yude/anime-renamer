@@ -137,12 +137,26 @@ func BuildPath(originalPath string, result *matcher.MatchResult) (string, error)
 func Rename(originalPath string, result *matcher.MatchResult, dryRun bool, outputDir string) *RenameResult {
 	r := &RenameResult{
 		OriginalPath: originalPath,
-		Confidence:   result.Confidence,
 	}
 
 	newPath, err := BuildPath(originalPath, result)
 	if err != nil {
 		r.Error = fmt.Errorf("build path: %w", err)
+		return r
+	}
+	r.Confidence = result.Confidence
+
+	// File collection and API matching can be separated by network requests.
+	// Recheck the source immediately before previewing or moving it so a file
+	// that disappeared or changed into a symlink/special file is not reported
+	// as a valid dry-run and is never handed to the move path.
+	info, err := os.Lstat(originalPath)
+	if err != nil {
+		r.Error = fmt.Errorf("check source %s: %w", originalPath, err)
+		return r
+	}
+	if !info.Mode().IsRegular() {
+		r.Error = fmt.Errorf("source is not a regular file: %s", originalPath)
 		return r
 	}
 
