@@ -14,6 +14,7 @@ import (
 	"github.com/yude/anime-renamer/internal/annict"
 	"github.com/yude/anime-renamer/internal/cache"
 	"github.com/yude/anime-renamer/internal/matcher"
+	"github.com/yude/anime-renamer/internal/normalize"
 	"github.com/yude/anime-renamer/internal/parser"
 	"github.com/yude/anime-renamer/internal/renamer"
 )
@@ -156,6 +157,12 @@ func processFile(
 	fmt.Fprintf(os.Stderr, "  Parsed:    Work=%q Episode=%d Subtitle=%q Date=%s\n",
 		meta.WorkTitle, meta.EpisodeNumber, meta.Subtitle,
 		meta.RecordedDate.Format("2006-01-02"))
+	if meta.EpisodeNumber <= 0 {
+		return &renamer.RenameResult{
+			OriginalPath: file,
+			Error:        fmt.Errorf("no supported single episode number found in %q", baseName),
+		}
+	}
 
 	// Step 2: Search Annict for work
 	works, err := searchWork(client, c, meta.WorkTitle, workCache, episodesCache)
@@ -163,6 +170,23 @@ func processFile(
 		return &renamer.RenameResult{
 			OriginalPath: file,
 			Error:        fmt.Errorf("search work: %w", err),
+		}
+	}
+	if len(works) == 0 {
+		if hint, ok := directoryTitleHint(file, meta.WorkTitle); ok {
+			works, err = searchWork(client, c, hint, workCache, episodesCache)
+			if err != nil {
+				return &renamer.RenameResult{
+					OriginalPath: file,
+					Error:        fmt.Errorf("search work using directory title %q: %w", hint, err),
+				}
+			}
+			if len(works) > 0 {
+				metadataWithHint := *meta
+				metadataWithHint.WorkTitle = hint
+				meta = &metadataWithHint
+				fmt.Fprintf(os.Stderr, "  Fallback:  using parent directory as work title: %q\n", hint)
+			}
 		}
 	}
 
@@ -262,6 +286,18 @@ func processFile(
 
 	fmt.Fprintf(os.Stderr, "  Rename:    %s\n", filepath.Base(result2.NewPath))
 	return result2
+}
+
+func directoryTitleHint(file, parsedTitle string) (string, bool) {
+	dir := filepath.Clean(filepath.Dir(file))
+	hint := filepath.Base(dir)
+	if hint == "" || hint == "." || hint == string(filepath.Separator) {
+		return "", false
+	}
+	if normalize.NormalizeForSearch(hint) == normalize.NormalizeForSearch(parsedTitle) {
+		return "", false
+	}
+	return hint, true
 }
 
 func workTitles(works []annict.Work) string {

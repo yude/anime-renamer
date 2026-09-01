@@ -286,6 +286,28 @@ func TestValidateTargetArgs(t *testing.T) {
 	}
 }
 
+func TestDirectoryTitleHint(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		file        string
+		parsedTitle string
+		want        string
+		wantOK      bool
+	}{
+		{name: "different parent is a hint", file: "/recordings/Charlotte/file.mp4", parsedTitle: "ヴァイスシュヴァルツ劇場 Charlotte", want: "Charlotte", wantOK: true},
+		{name: "normalized equal parent is redundant", file: "/recordings/作品/file.mp4", parsedTitle: "作品", wantOK: false},
+		{name: "relative file has no useful parent", file: "file.mp4", parsedTitle: "作品", wantOK: false},
+		{name: "filesystem root is not a title", file: "/file.mp4", parsedTitle: "作品", wantOK: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := directoryTitleHint(tt.file, tt.parsedTitle)
+			if got != tt.want || ok != tt.wantOK {
+				t.Errorf("directoryTitleHint() = %q, %v; want %q, %v", got, ok, tt.want, tt.wantOK)
+			}
+		})
+	}
+}
+
 func TestEpisodesComplete(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -413,6 +435,97 @@ func TestProcessFileSkipsEpisodesForUnrelatedSearchResults(t *testing.T) {
 	}
 	if len(episodeWorkIDs) != 1 || episodeWorkIDs[0] != "1" {
 		t.Errorf("episode API work IDs = %v, want only matching work [1]", episodeWorkIDs)
+	}
+}
+
+func TestProcessFileUsesDirectoryTitleAfterEmptyFilenameSearch(t *testing.T) {
+	graphqlRequests := 0
+	restWorkRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/graphql":
+			graphqlRequests++
+			if graphqlRequests == 1 {
+				fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[]}}}`)
+				return
+			}
+			fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[
+				{"node":{"annictId":1,"title":"Charlotte","seasonName":"SUMMER","seasonYear":2015,"episodesCount":1,"episodes":{"edges":[{"node":{"annictId":101,"number":1,"sortNumber":1,"title":"我他人を思う"}}]}}}
+			]}}}`)
+		case "/works":
+			restWorkRequests++
+			fmt.Fprint(w, `{"works":[]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	dir := filepath.Join(t.TempDir(), "Charlotte")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "ヴァイスシュヴァルツ劇場 アニメ Charlotte 第一話.mp4")
+	if err := os.WriteFile(file, []byte("recording"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	client := annict.NewClientWithURLs("token", server.URL, server.URL+"/graphql")
+	result := processFile(
+		file,
+		client,
+		cache.NewDisabled(filepath.Join(dir, "cache")),
+		make(map[string][]annict.Work),
+		make(map[int][]annict.Episode),
+		make(map[programsCacheKey][]annict.Program),
+		true,
+		false,
+		matcher.AutoRenameThreshold,
+		"",
+	)
+	if result.Error != nil {
+		t.Fatalf("processFile() error = %v", result.Error)
+	}
+	if result.WorkTitle != "Charlotte" || result.EpisodeNum != 1 {
+		t.Errorf("processFile() result = %+v, want Charlotte episode 1", result)
+	}
+	if graphqlRequests != 2 || restWorkRequests != 1 {
+		t.Errorf("requests: graphql=%d REST works=%d, want 2 and 1", graphqlRequests, restWorkRequests)
+	}
+}
+
+func TestProcessFileNoEpisodeDoesNotContactAnnict(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "作品 総集編 (20260801).mp4")
+	if err := os.WriteFile(file, []byte("recording"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	client := annict.NewClientWithURLs("token", server.URL, server.URL+"/graphql")
+	result := processFile(
+		file,
+		client,
+		cache.NewDisabled(filepath.Join(dir, "cache")),
+		make(map[string][]annict.Work),
+		make(map[int][]annict.Episode),
+		make(map[programsCacheKey][]annict.Program),
+		true,
+		false,
+		matcher.AutoRenameThreshold,
+		"",
+	)
+	if result.Error == nil {
+		t.Fatal("processFile() error = nil, want unsupported episode error")
+	}
+	if requests != 0 {
+		t.Errorf("Annict requests = %d, want 0 for a recording without an episode number", requests)
 	}
 }
 
