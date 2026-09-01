@@ -261,7 +261,9 @@ func TestGetEpisodes_PaginatesAndSetsWorkID(t *testing.T) {
 			fmt.Fprintf(w, `{"episodes":[%s]}`, joinJSON(episodes))
 			return
 		}
-		fmt.Fprint(w, `{"episodes":[{"id":51,"number":51,"title":"ep51"}]}`)
+		// The REST API documents episode numbers as quoted decimals; the
+		// client must accept that form as well as GraphQL's JSON numbers.
+		fmt.Fprint(w, `{"episodes":[{"id":51,"number":"51","title":"ep51"}]}`)
 	}))
 	defer rest.Close()
 

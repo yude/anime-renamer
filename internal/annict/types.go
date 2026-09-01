@@ -1,6 +1,12 @@
 package annict
 
-import "time"
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"time"
+)
 
 // Work represents an Annict work (anime title).
 type Work struct {
@@ -27,6 +33,46 @@ type Episode struct {
 	Title        string   `json:"title"`
 	WorkID       int      `json:"-"`
 	RecordsCount int      `json:"records_count"`
+}
+
+// UnmarshalJSON accepts both Annict representations of an episode number:
+// GraphQL returns a JSON number while the REST API can return the same value as
+// a quoted decimal string. Keeping Number as *float64 lets the matcher retain
+// its existing fractional-special handling across both transports.
+func (e *Episode) UnmarshalJSON(data []byte) error {
+	type episodeAlias Episode
+	var decoded episodeAlias
+	aux := struct {
+		*episodeAlias
+		Number json.RawMessage `json:"number"`
+	}{episodeAlias: &decoded}
+
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if len(aux.Number) == 0 || bytes.Equal(aux.Number, []byte("null")) {
+		*e = Episode(decoded)
+		return nil
+	}
+
+	var number float64
+	if aux.Number[0] == '"' {
+		var text string
+		if err := json.Unmarshal(aux.Number, &text); err != nil {
+			return fmt.Errorf("decode episode number string: %w", err)
+		}
+		parsed, err := strconv.ParseFloat(text, 64)
+		if err != nil {
+			return fmt.Errorf("decode episode number %q: %w", text, err)
+		}
+		number = parsed
+	} else if err := json.Unmarshal(aux.Number, &number); err != nil {
+		return fmt.Errorf("decode episode number: %w", err)
+	}
+
+	decoded.Number = &number
+	*e = Episode(decoded)
+	return nil
 }
 
 // Program represents a broadcast program.
