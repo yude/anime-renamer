@@ -75,6 +75,7 @@ type RenameResult struct {
 	Subtitle     string
 	Confidence   int
 	Renamed      bool
+	SkipReason   string
 	Error        error
 }
 

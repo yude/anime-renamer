@@ -40,6 +40,17 @@ func TestParseFilenameAmbiguousEpisodeError(t *testing.T) {
 	}
 }
 
+func TestParseFilenameUnsupportedEpisodeError(t *testing.T) {
+	for _, input := range []string{
+		"作品 第0話「前日譚」.mp4",
+		"作品 第〇話「前日譚」.mp4",
+	} {
+		if _, err := ParseFilename(input); !errors.Is(err, ErrUnsupportedEpisode) {
+			t.Errorf("ParseFilename(%q) error = %v, want ErrUnsupportedEpisode", input, err)
+		}
+	}
+}
+
 func TestParseFilename(t *testing.T) {
 	jst := time.FixedZone("JST", 9*60*60)
 

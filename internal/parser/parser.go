@@ -19,11 +19,18 @@ type RecordingMetadata struct {
 	RecordedDate  time.Time
 }
 
-// ErrAmbiguousEpisode is returned when one recording names more than one
-// episode or uses a fractional episode number. The current matcher and output
-// format represent exactly one positive integer episode, so accepting only the
-// first integer would silently rename the recording as a different episode.
-var ErrAmbiguousEpisode = errors.New("ambiguous episode notation")
+var (
+	// ErrAmbiguousEpisode is returned when one recording names more than one
+	// episode or uses a fractional episode number. The current matcher and
+	// output format represent exactly one positive integer episode, so accepting
+	// only the first integer would silently rename the recording as a different
+	// episode.
+	ErrAmbiguousEpisode = errors.New("ambiguous episode notation")
+
+	// ErrUnsupportedEpisode is returned when a filename explicitly contains an
+	// episode number that the Annict matching/output model cannot represent.
+	ErrUnsupportedEpisode = errors.New("unsupported episode number")
+)
 
 var (
 	// Matches compact and recorder-style dates at the end: (YYYYMMDD),
@@ -174,7 +181,7 @@ func decimalEpisodeNumber(s string) (int, error) {
 		return 0, err
 	}
 	if number <= 0 {
-		return 0, fmt.Errorf("must be positive")
+		return 0, fmt.Errorf("%w: must be positive", ErrUnsupportedEpisode)
 	}
 	return number, nil
 }
@@ -319,8 +326,11 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 		if m := earliestEpisodeMatch(name, kanjiEpisodePattern); m != nil {
 			kanjiNum := name[m[2]:m[3]]
 			v, ok := kanjiToInt(kanjiNum)
-			if !ok || v <= 0 {
+			if !ok {
 				return nil, fmt.Errorf("invalid episode number %q", kanjiNum)
+			}
+			if v <= 0 {
+				return nil, fmt.Errorf("invalid episode number %q: %w", kanjiNum, ErrUnsupportedEpisode)
 			}
 			episodeNumber = v
 			epStart = m[0]

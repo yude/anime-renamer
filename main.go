@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -105,6 +106,9 @@ func main() {
 		case result.Error != nil:
 			fmt.Fprintf(os.Stderr, "  ERROR: %v\n\n", result.Error)
 			failed++
+		case result.SkipReason != "":
+			fmt.Fprintf(os.Stderr, "  SKIP: %s\n\n", result.SkipReason)
+			skipped++
 		case result.Renamed:
 			renamed++
 		default:
@@ -150,6 +154,12 @@ func processFile(
 	// Step 1: Parse filename
 	meta, err := parser.ParseFilename(baseName)
 	if err != nil {
+		if errors.Is(err, parser.ErrAmbiguousEpisode) || errors.Is(err, parser.ErrUnsupportedEpisode) {
+			return &renamer.RenameResult{
+				OriginalPath: file,
+				SkipReason:   fmt.Sprintf("cannot represent as one positive integer episode: %v", err),
+			}
+		}
 		return &renamer.RenameResult{
 			OriginalPath: file,
 			Error:        fmt.Errorf("parse filename: %w", err),
@@ -162,7 +172,7 @@ func processFile(
 	if meta.EpisodeNumber <= 0 {
 		return &renamer.RenameResult{
 			OriginalPath: file,
-			Error:        fmt.Errorf("no supported single episode number found in %q", baseName),
+			SkipReason:   fmt.Sprintf("no supported single episode number found in %q", baseName),
 		}
 	}
 

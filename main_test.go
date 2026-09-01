@@ -499,6 +499,19 @@ func TestProcessFileUsesDirectoryTitleAfterEmptyFilenameSearch(t *testing.T) {
 }
 
 func TestProcessFileNoEpisodeDoesNotContactAnnict(t *testing.T) {
+	testProcessFileSkippedWithoutAnnict(t, "作品 総集編 (20260801).mp4", "no supported single episode number")
+}
+
+func TestProcessFileAmbiguousEpisodeDoesNotContactAnnict(t *testing.T) {
+	testProcessFileSkippedWithoutAnnict(t, "作品 #01,02「第一話 ／ 第二話」.mp4", "cannot represent as one positive integer episode")
+}
+
+func TestProcessFileEpisodeZeroDoesNotContactAnnict(t *testing.T) {
+	testProcessFileSkippedWithoutAnnict(t, "作品 第0話「前日譚」.mp4", "cannot represent as one positive integer episode")
+}
+
+func testProcessFileSkippedWithoutAnnict(t *testing.T, baseName, wantReason string) {
+	t.Helper()
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
@@ -507,7 +520,7 @@ func TestProcessFileNoEpisodeDoesNotContactAnnict(t *testing.T) {
 	defer server.Close()
 
 	dir := t.TempDir()
-	file := filepath.Join(dir, "作品 総集編 (20260801).mp4")
+	file := filepath.Join(dir, baseName)
 	if err := os.WriteFile(file, []byte("recording"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -525,8 +538,11 @@ func TestProcessFileNoEpisodeDoesNotContactAnnict(t *testing.T) {
 		matcher.AutoRenameThreshold,
 		"",
 	)
-	if result.Error == nil {
-		t.Fatal("processFile() error = nil, want unsupported episode error")
+	if result.Error != nil {
+		t.Fatalf("processFile() error = %v, want safe skip", result.Error)
+	}
+	if !strings.Contains(result.SkipReason, wantReason) {
+		t.Errorf("processFile() SkipReason = %q, want substring %q", result.SkipReason, wantReason)
 	}
 	if requests != 0 {
 		t.Errorf("Annict requests = %d, want 0 for a recording without an episode number", requests)
