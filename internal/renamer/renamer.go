@@ -130,6 +130,21 @@ func BuildPath(originalPath string, result *matcher.MatchResult) (string, error)
 	return filepath.Join(workDir, filename), nil
 }
 
+// BuildDestinationPath applies the optional output root to BuildPath without
+// touching the filesystem. Batch callers use it to reserve destinations before
+// a dry-run or move, so two sources cannot silently plan the same output.
+func BuildDestinationPath(originalPath string, result *matcher.MatchResult, outputDir string) (string, error) {
+	newPath, err := BuildPath(originalPath, result)
+	if err != nil {
+		return "", err
+	}
+	if outputDir == "" {
+		return newPath, nil
+	}
+	workTitle := filepath.Base(filepath.Dir(newPath))
+	return filepath.Join(outputDir, workTitle, filepath.Base(newPath)), nil
+}
+
 // Rename performs the actual rename if dryRun is false.
 // If outputDir is non-empty, the destination is relocated there while
 // preserving the <WorkTitle>/<filename> structure computed by BuildPath.
@@ -139,7 +154,7 @@ func Rename(originalPath string, result *matcher.MatchResult, dryRun bool, outpu
 		OriginalPath: originalPath,
 	}
 
-	newPath, err := BuildPath(originalPath, result)
+	newPath, err := BuildDestinationPath(originalPath, result, outputDir)
 	if err != nil {
 		r.Error = fmt.Errorf("build path: %w", err)
 		return r
@@ -158,11 +173,6 @@ func Rename(originalPath string, result *matcher.MatchResult, dryRun bool, outpu
 	if !info.Mode().IsRegular() {
 		r.Error = fmt.Errorf("source is not a regular file: %s", originalPath)
 		return r
-	}
-
-	if outputDir != "" {
-		workTitle := filepath.Base(filepath.Dir(newPath))
-		newPath = filepath.Join(outputDir, workTitle, filepath.Base(newPath))
 	}
 
 	r.NewPath = newPath

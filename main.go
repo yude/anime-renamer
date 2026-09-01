@@ -92,13 +92,14 @@ func main() {
 	workCache := make(map[string][]annict.Work)
 	episodesCache := make(map[int][]annict.Episode)
 	programsCache := make(map[programsCacheKey][]annict.Program)
+	plannedDestinations := make(map[string]string)
 
 	renamed := 0
 	skipped := 0
 	failed := 0
 
 	for _, file := range files {
-		result := processFile(file, annictClient, c, workCache, episodesCache, programsCache, *dryRun, *verbose, *confidenceThreshold, *outputDir)
+		result := processFile(file, annictClient, c, workCache, episodesCache, programsCache, plannedDestinations, *dryRun, *verbose, *confidenceThreshold, *outputDir)
 
 		switch {
 		case result.Error != nil:
@@ -138,6 +139,7 @@ func processFile(
 	workCache map[string][]annict.Work,
 	episodesCache map[int][]annict.Episode,
 	programsCache map[programsCacheKey][]annict.Program,
+	plannedDestinations map[string]string,
 	dryRun, verbose bool,
 	confidenceThreshold int,
 	outputDir string,
@@ -277,12 +279,33 @@ func processFile(
 		}
 	}
 
-	// Step 7: Rename (or preview in dry-run mode). outputDir, if set, is
+	// Step 7: Reserve the batch destination before renaming. The filesystem
+	// no-replace checks still protect against pre-existing entries; this map
+	// additionally catches two sources in the same batch that would otherwise
+	// both appear valid during a dry-run.
+	plannedPath, err := renamer.BuildDestinationPath(file, result, outputDir)
+	if err != nil {
+		return &renamer.RenameResult{
+			OriginalPath: file,
+			Error:        fmt.Errorf("build destination: %w", err),
+		}
+	}
+	planKey := filepath.Clean(plannedPath)
+	if previousSource, exists := plannedDestinations[planKey]; exists && previousSource != file {
+		return &renamer.RenameResult{
+			OriginalPath: file,
+			NewPath:      plannedPath,
+			Error:        fmt.Errorf("batch destination collision: %s is also planned from %s", plannedPath, previousSource),
+		}
+	}
+
+	// Step 8: Rename (or preview in dry-run mode). outputDir, if set, is
 	// honored for both the actual move and the dry-run preview.
 	result2 := renamer.Rename(file, result, dryRun, outputDir)
 	if result2.Error != nil {
 		return result2
 	}
+	plannedDestinations[planKey] = file
 
 	fmt.Fprintf(os.Stderr, "  Rename:    %s\n", filepath.Base(result2.NewPath))
 	return result2

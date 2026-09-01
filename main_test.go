@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -425,6 +426,7 @@ func TestProcessFileSkipsEpisodesForUnrelatedSearchResults(t *testing.T) {
 		make(map[string][]annict.Work),
 		make(map[int][]annict.Episode),
 		make(map[programsCacheKey][]annict.Program),
+		make(map[string]string),
 		true,
 		false,
 		matcher.AutoRenameThreshold,
@@ -479,6 +481,7 @@ func TestProcessFileUsesDirectoryTitleAfterEmptyFilenameSearch(t *testing.T) {
 		make(map[string][]annict.Work),
 		make(map[int][]annict.Episode),
 		make(map[programsCacheKey][]annict.Program),
+		make(map[string]string),
 		true,
 		false,
 		matcher.AutoRenameThreshold,
@@ -516,6 +519,7 @@ func TestProcessFileNoEpisodeDoesNotContactAnnict(t *testing.T) {
 		make(map[string][]annict.Work),
 		make(map[int][]annict.Episode),
 		make(map[programsCacheKey][]annict.Program),
+		make(map[string]string),
 		true,
 		false,
 		matcher.AutoRenameThreshold,
@@ -526,6 +530,53 @@ func TestProcessFileNoEpisodeDoesNotContactAnnict(t *testing.T) {
 	}
 	if requests != 0 {
 		t.Errorf("Annict requests = %d, want 0 for a recording without an episode number", requests)
+	}
+}
+
+func TestProcessFileDetectsBatchDestinationCollisionInDryRun(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/graphql" {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[
+			{"node":{"annictId":1,"title":"作品","seasonName":"SUMMER","seasonYear":2026,"episodesCount":1,"episodes":{"edges":[{"node":{"annictId":101,"number":1,"sortNumber":1,"title":"第一話"}}]}}}
+		]}}}`)
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	first := filepath.Join(dir, "作品 第1話「第一話」 (20260801).mp4")
+	second := filepath.Join(dir, "作品 #1「第一話」 (20260802).mp4")
+	for _, file := range []string{first, second} {
+		if err := os.WriteFile(file, []byte("recording"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	client := annict.NewClientWithURLs("token", server.URL, server.URL+"/graphql")
+	c := cache.NewDisabled(filepath.Join(dir, "cache"))
+	workCache := make(map[string][]annict.Work)
+	episodesCache := make(map[int][]annict.Episode)
+	programsCache := make(map[programsCacheKey][]annict.Program)
+	plans := make(map[string]string)
+
+	firstResult := processFile(first, client, c, workCache, episodesCache, programsCache, plans, true, false, matcher.AutoRenameThreshold, "")
+	if firstResult.Error != nil {
+		t.Fatalf("first processFile() error = %v", firstResult.Error)
+	}
+	secondResult := processFile(second, client, c, workCache, episodesCache, programsCache, plans, true, false, matcher.AutoRenameThreshold, "")
+	if secondResult.Error == nil || !strings.Contains(secondResult.Error.Error(), "batch destination collision") {
+		t.Fatalf("second processFile() error = %v, want batch destination collision", secondResult.Error)
+	}
+	if secondResult.NewPath != firstResult.NewPath {
+		t.Errorf("collision paths differ: first=%q second=%q", firstResult.NewPath, secondResult.NewPath)
+	}
+	for _, file := range []string{first, second} {
+		if _, err := os.Stat(file); err != nil {
+			t.Errorf("dry-run changed source %s: %v", file, err)
+		}
 	}
 }
 
@@ -561,6 +612,7 @@ func TestProcessFileFetchesProgramsOnlyForSelectedWork(t *testing.T) {
 		make(map[string][]annict.Work),
 		make(map[int][]annict.Episode),
 		make(map[programsCacheKey][]annict.Program),
+		make(map[string]string),
 		true,
 		false,
 		matcher.AutoRenameThreshold,
@@ -605,6 +657,7 @@ func TestProcessFileSkipsProgramsWhenConfidenceAlreadyMeetsThreshold(t *testing.
 		make(map[string][]annict.Work),
 		make(map[int][]annict.Episode),
 		make(map[programsCacheKey][]annict.Program),
+		make(map[string]string),
 		true,
 		false,
 		matcher.AutoRenameThreshold,
