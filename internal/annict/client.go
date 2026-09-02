@@ -473,11 +473,10 @@ func spaceBeforeInnerHyphens(s string) string {
 }
 
 func stripParentheticalSegments(s string) string {
-	runes := []rune(s)
 	depth := 0
 	balanced := true
 	var b strings.Builder
-	for _, r := range runes {
+	for _, r := range s {
 		switch r {
 		case '(', '（':
 			depth++
