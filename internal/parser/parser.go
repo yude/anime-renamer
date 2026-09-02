@@ -412,6 +412,8 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 
 	// Trim and clean
 	workTitle = normalize.TrimSpaces(workTitle)
+	workTitle = strings.TrimRight(workTitle, "_＿▼")
+	workTitle = normalize.TrimSpaces(workTitle)
 	workTitle = normalize.CollapseSpaces(workTitle)
 	subtitle = normalize.TrimSpaces(subtitle)
 

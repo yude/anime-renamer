@@ -224,10 +224,10 @@ func Match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 // Match would reject do not trigger unnecessary follow-up requests.
 func MatchingWorks(title string, works []annict.Work) []annict.Work {
 	var matches []annict.Work
-	normalized := normalize.NormalizeForSearch(title)
+	normalized := normalize.NormalizeTitleForMatch(title)
 
 	for _, w := range works {
-		if normalize.NormalizeForSearch(w.Title) == normalized {
+		if normalize.NormalizeTitleForMatch(w.Title) == normalized {
 			matches = append(matches, w)
 		}
 	}
@@ -235,7 +235,7 @@ func MatchingWorks(title string, works []annict.Work) []annict.Work {
 	// Fallback: substring match if no exact match
 	if len(matches) == 0 {
 		for _, w := range works {
-			wNorm := normalize.NormalizeForSearch(w.Title)
+			wNorm := normalize.NormalizeTitleForMatch(w.Title)
 			if len(wNorm) > 0 && len(normalized) > 0 {
 				if contains(wNorm, normalized) || contains(normalized, wNorm) {
 					matches = append(matches, w)

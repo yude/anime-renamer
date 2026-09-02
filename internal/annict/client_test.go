@@ -1,6 +1,7 @@
 package annict
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,6 +12,52 @@ import (
 	"testing"
 	"time"
 )
+
+func TestSearchTitleVariants(t *testing.T) {
+	for _, tt := range []struct {
+		input string
+		want  string
+	}{
+		{input: "16bitセンセーション -ANOTHER LAYER-", want: "16bitセンセーション ANOTHER LAYER"},
+		{input: "2．5次元の誘惑(リリサ)", want: "2.5次元の誘惑"},
+		{input: "ATRI-My Dear Moments-", want: "ATRI -My Dear Moments-"},
+	} {
+		if got := searchTitleVariants(tt.input); !slices.Contains(got, tt.want) {
+			t.Errorf("searchTitleVariants(%q) = %q, want variant %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestSearchWorksSubmitsExpandedTitleVariantsInOneRequest(t *testing.T) {
+	requests := 0
+	graphql := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		var request struct {
+			Variables struct {
+				Titles []string `json:"titles"`
+			} `json:"variables"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(request.Variables.Titles, "16bitセンセーション ANOTHER LAYER") {
+			t.Errorf("titles = %q, want punctuation-free search variant", request.Variables.Titles)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[{"node":{"annictId":1,"title":"16bitセンセーション ANOTHER LAYER","episodesCount":1,"episodes":{"edges":[]}}}]}}}`)
+	}))
+	defer graphql.Close()
+
+	rest := alwaysFailServer(t)
+	defer rest.Close()
+	client := NewClientWithURLs("token", rest.URL, graphql.URL)
+	if _, _, err := client.SearchWorks("16bitセンセーション -ANOTHER LAYER-"); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 1 {
+		t.Errorf("GraphQL requests = %d, want 1", requests)
+	}
+}
 
 func TestMain(m *testing.M) {
 	// Retry-exhaustion tests would otherwise wait out the real 1s+2s backoff.

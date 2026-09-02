@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/yude/anime-renamer/internal/normalize"
 )
@@ -197,25 +198,7 @@ func (c *Client) searchWorksGraphQL(title string) ([]Work, map[int][]Episode, er
   }
 }`
 
-	punctNorm := normalizePunctForSearch(title)
-
-	titles := []string{title}
-	if punctNorm != title {
-		titles = append(titles, punctNorm)
-	}
-	if norm := normalize.NormalizeForSearch(title); norm != title && norm != punctNorm {
-		titles = append(titles, norm)
-	}
-	// Deduplicate
-	seen := make(map[string]bool)
-	var uniqueTitles []string
-	for _, t := range titles {
-		if !seen[t] {
-			seen[t] = true
-			uniqueTitles = append(uniqueTitles, t)
-		}
-	}
-	titles = uniqueTitles
+	titles := searchTitleVariants(title)
 
 	variables := map[string]interface{}{
 		"titles": titles,
@@ -288,6 +271,86 @@ func (c *Client) searchWorksGraphQL(title string) ([]Work, map[int][]Episode, er
 	}
 
 	return works, episodesByWork, nil
+}
+
+// searchTitleVariants keeps Annict search to one GraphQL request while
+// covering presentation differences observed in recorder EPG names. The raw
+// title always remains first; broader variants only affect candidate recall,
+// and matcher.MatchingWorks performs the strict post-filtering step.
+func searchTitleVariants(title string) []string {
+	seen := make(map[string]bool)
+	variants := make([]string, 0, 10)
+	add := func(value string) {
+		value = normalize.CollapseSpaces(strings.TrimSpace(value))
+		if value == "" || seen[value] {
+			return
+		}
+		seen[value] = true
+		variants = append(variants, value)
+	}
+
+	add(title)
+	add(normalizePunctForSearch(title))
+	add(normalize.Normalize(title))
+	add(normalize.NormalizeForSearch(title))
+	add(spaceBeforeInnerHyphens(title))
+	add(punctuationAsSpaces(title))
+
+	if stripped := stripParentheticalSegments(title); stripped != title {
+		add(stripped)
+		add(normalize.Normalize(stripped))
+		add(normalize.NormalizeForSearch(stripped))
+		add(punctuationAsSpaces(stripped))
+	}
+	return variants
+}
+
+func punctuationAsSpaces(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsPunct(r) || unicode.IsSymbol(r) {
+			return ' '
+		}
+		return r
+	}, s)
+}
+
+func spaceBeforeInnerHyphens(s string) string {
+	runes := []rune(s)
+	var b strings.Builder
+	for i, r := range runes {
+		if (r == '-' || r == '－') && i > 0 && i+1 < len(runes) && !unicode.IsSpace(runes[i-1]) && !unicode.IsSpace(runes[i+1]) {
+			b.WriteRune(' ')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func stripParentheticalSegments(s string) string {
+	runes := []rune(s)
+	depth := 0
+	balanced := true
+	var b strings.Builder
+	for _, r := range runes {
+		switch r {
+		case '(', '（':
+			depth++
+		case ')', '）':
+			if depth == 0 {
+				balanced = false
+				continue
+			}
+			depth--
+		default:
+			if depth == 0 {
+				b.WriteRune(r)
+			}
+		}
+	}
+	if !balanced || depth != 0 {
+		return s
+	}
+	return b.String()
 }
 
 // graphqlSeason converts GraphQL's separate year and enum fields (for

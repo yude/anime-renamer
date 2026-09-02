@@ -73,6 +73,20 @@ func TestParseFilename(t *testing.T) {
 			wantDate:  time.Date(2026, 8, 13, 0, 0, 0, 0, jst),
 		},
 		{
+			name:      "EPG underscore title separator",
+			input:     "けいおん！_第1話「廃部!」.mp4",
+			wantTitle: "けいおん！",
+			wantEp:    1,
+			wantSub:   "廃部!",
+		},
+		{
+			name:      "EPG triangle title separator",
+			input:     "五等分の花嫁▼第1話「五等分の花嫁」.mp4",
+			wantTitle: "五等分の花嫁",
+			wantEp:    1,
+			wantSub:   "五等分の花嫁",
+		},
+		{
 			name:      "half-width period",
 			input:     "作品 ep.7「タイトル」 (20260801).mp4",
 			wantTitle: "作品",

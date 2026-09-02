@@ -64,6 +64,24 @@ func TestNormalizeForSearch(t *testing.T) {
 	}
 }
 
+func TestNormalizeTitleForMatch(t *testing.T) {
+	for _, tt := range []struct {
+		a, b string
+		eq   bool
+	}{
+		{a: "16bitセンセーション -ANOTHER LAYER-", b: "16bitセンセーション ANOTHER LAYER", eq: true},
+		{a: "ひぐらしのなく頃に 卒", b: "ひぐらしのなく頃に卒", eq: true},
+		{a: "プリンセスコネクト！Re：Dive", b: "プリンセスコネクト!re:dive", eq: true},
+		{a: "けいおん！", b: "けいおん！！", eq: false},
+		{a: "作品 第2期", b: "作品 第3期", eq: false},
+	} {
+		got := NormalizeTitleForMatch(tt.a) == NormalizeTitleForMatch(tt.b)
+		if got != tt.eq {
+			t.Errorf("NormalizeTitleForMatch(%q) == NormalizeTitleForMatch(%q) is %v, want %v", tt.a, tt.b, got, tt.eq)
+		}
+	}
+}
+
 func TestNormalizeSubtitleForMatch(t *testing.T) {
 	tests := []struct {
 		name     string

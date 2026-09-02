@@ -549,6 +549,17 @@ func TestMatchSubtitleDoesNotDropMeaningfulParentheticalQualifier(t *testing.T) 
 	}
 }
 
+func TestMatchingWorksIgnoresTitlePresentationPunctuation(t *testing.T) {
+	works := []annict.Work{
+		{ID: 1, Title: "16bitセンセーション ANOTHER LAYER"},
+		{ID: 2, Title: "16bitセンセーション ANOTHER LAYER 特別番組"},
+	}
+	got := MatchingWorks("16bitセンセーション -ANOTHER LAYER-", works)
+	if len(got) != 1 || got[0].ID != 1 {
+		t.Errorf("MatchingWorks() = %+v, want only the punctuation-equivalent main work", got)
+	}
+}
+
 func TestFindMatchingProgram(t *testing.T) {
 	jst := time.FixedZone("JST", 9*60*60)
 	date := time.Date(2026, 8, 13, 0, 0, 0, 0, jst)

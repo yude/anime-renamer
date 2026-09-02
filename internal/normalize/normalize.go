@@ -45,6 +45,34 @@ func NormalizeForSearch(s string) string {
 	return CollapseSpaces(strings.TrimSpace(Normalize(b.String())))
 }
 
+// NormalizeTitleForMatch builds a comparison key for work titles while
+// ignoring presentation-only differences that commonly vary between EPG and
+// Annict data: width, letter case, whitespace, punctuation, and symbols. It
+// deliberately retains every letter and number, including season/cour digits,
+// so titles with different semantic qualifiers do not become equal.
+func NormalizeTitleForMatch(s string) string {
+	s = strings.ToLower(Normalize(s))
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) || isTitlePresentationRune(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+func isTitlePresentationRune(r rune) bool {
+	switch r {
+	case '-', '‐', '‑', '‒', '–', '—', '―',
+		'.', '・', '･', '/', '\\', ':', ';', ',', '_',
+		'(', ')', '[', ']', '{', '}',
+		'「', '」', '『', '』', '【', '】', '〈', '〉', '《', '》', '<', '>',
+		'"', '\'', '`', '“', '”', '‘', '’':
+		return true
+	default:
+		return false
+	}
+}
+
 // NormalizeSubtitleForMatch normalizes episode subtitles while ignoring
 // presentation-only differences commonly introduced by EPG providers:
 // kana-only readings in parentheses and whitespace.
