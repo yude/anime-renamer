@@ -346,9 +346,44 @@ func TestNarrowByEpisodeNumberFallsBackToSortNumber(t *testing.T) {
 		2: {{ID: 201, SortNumber: 9}},
 	}
 
-	got := narrowByEpisodeNumber(works, 5, episodesByWork)
+	got := narrowByEpisodeNumber(works, 5, "", episodesByWork)
 	if got == nil || got.Work.ID != 1 || got.EpisodeNumber != 5 {
 		t.Errorf("narrowByEpisodeNumber() = %+v, want work ID 1 episode 5 via SortNumber fallback", got)
+	}
+}
+
+func TestNarrowByEpisodeNumberUsesUniqueSubtitleAcrossWorks(t *testing.T) {
+	works := []annict.Work{{ID: 1, Title: "作品 1st"}, {ID: 2, Title: "作品 2nd"}}
+	episodesByWork := map[int][]annict.Episode{
+		1: {{ID: 101, Number: float64Ptr(1), Title: "はじまり"}},
+		2: {{ID: 201, Number: float64Ptr(1), Title: "再会"}},
+	}
+	got := narrowByEpisodeNumber(works, 1, "再会", episodesByWork)
+	if got == nil || got.Work.ID != 2 || got.EpisodeNumber != 1 {
+		t.Errorf("narrowByEpisodeNumber() = %+v, want work 2 episode 1", got)
+	}
+}
+
+func TestNarrowByEpisodeNumberMapsContinuousNumberByUniqueSubtitle(t *testing.T) {
+	works := []annict.Work{{ID: 1, Title: "作品 前半"}, {ID: 2, Title: "作品 後半"}}
+	episodesByWork := map[int][]annict.Episode{
+		1: {{ID: 101, Number: float64Ptr(10), Title: "前半最終話"}},
+		2: {{ID: 201, Number: float64Ptr(1), Title: "後半開始"}},
+	}
+	got := narrowByEpisodeNumber(works, 11, "後半開始", episodesByWork)
+	if got == nil || got.Work.ID != 2 || got.EpisodeNumber != 1 {
+		t.Errorf("narrowByEpisodeNumber() = %+v, want work 2 local episode 1", got)
+	}
+}
+
+func TestNarrowByEpisodeNumberRejectsSubtitleSharedAcrossWorks(t *testing.T) {
+	works := []annict.Work{{ID: 1, Title: "作品 1st"}, {ID: 2, Title: "作品 2nd"}}
+	episodesByWork := map[int][]annict.Episode{
+		1: {{ID: 101, Number: float64Ptr(1), Title: "総集編"}},
+		2: {{ID: 201, Number: float64Ptr(1), Title: "総集編"}},
+	}
+	if got := narrowByEpisodeNumber(works, 1, "総集編", episodesByWork); got != nil {
+		t.Errorf("narrowByEpisodeNumber() = %+v, want nil for a shared subtitle", got)
 	}
 }
 

@@ -80,7 +80,7 @@ func Match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 			} else if len(narrowed) > 0 {
 				// Still multiple, try narrowing by episode number range
 				if meta.EpisodeNumber > 0 {
-					epMatched := narrowByEpisodeNumber(narrowed, meta.EpisodeNumber, episodesByWork)
+					epMatched := narrowByEpisodeNumber(narrowed, meta.EpisodeNumber, meta.Subtitle, episodesByWork)
 					if epMatched != nil {
 						work = *epMatched.Work
 						episodeNumberForMatch = epMatched.EpisodeNumber
@@ -105,7 +105,7 @@ func Match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 			} else {
 				// Season filtering removed all candidates, fall back to original
 				if meta.EpisodeNumber > 0 {
-					epMatched := narrowByEpisodeNumber(candidateWorks, meta.EpisodeNumber, episodesByWork)
+					epMatched := narrowByEpisodeNumber(candidateWorks, meta.EpisodeNumber, meta.Subtitle, episodesByWork)
 					if epMatched != nil {
 						work = *epMatched.Work
 						episodeNumberForMatch = epMatched.EpisodeNumber
@@ -130,7 +130,7 @@ func Match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 			}
 		} else if meta.EpisodeNumber > 0 {
 			// No date, try narrowing by episode number
-			epMatched := narrowByEpisodeNumber(candidateWorks, meta.EpisodeNumber, episodesByWork)
+			epMatched := narrowByEpisodeNumber(candidateWorks, meta.EpisodeNumber, meta.Subtitle, episodesByWork)
 			if epMatched != nil {
 				work = *epMatched.Work
 				episodeNumberForMatch = epMatched.EpisodeNumber
@@ -268,26 +268,55 @@ type episodeNumberNarrowing struct {
 	EpisodeNumber int
 }
 
-// narrowByEpisodeNumber returns the single work whose episodes contain the given number.
+// narrowByEpisodeNumber returns the single work whose episode number or unique
+// normalized subtitle identifies the recording.
 // For multi-cour works (e.g., "鎧真伝サムライトルーパー" + "鎧真伝サムライトルーパー 第2クール"),
 // if the episode number exceeds the first cour's count, tries to match against the 2nd cour
 // with an offset.
-func narrowByEpisodeNumber(works []annict.Work, episodeNum int, episodesByWork map[int][]annict.Episode) *episodeNumberNarrowing {
-	var match *annict.Work
+func narrowByEpisodeNumber(works []annict.Work, episodeNum int, subtitle string, episodesByWork map[int][]annict.Episode) *episodeNumberNarrowing {
+	var numberMatch *annict.Work
+	var numberAndSubtitleMatch *episodeNumberNarrowing
+	numberAmbiguous := false
+	subtitleMatches := make([]episodeNumberNarrowing, 0, 1)
 	for i := range works {
 		episodes := episodesByWork[works[i].ID]
 		for j := range episodes {
-			if episodeNumberMatches(&episodes[j], episodeNum) {
-				if match != nil {
-					return nil // ambiguous
+			effectiveNumber, numberOK := EpisodeNumber(&episodes[j])
+			subtitleOK := subtitle != "" && episodes[j].Title != "" && subtitlesEquivalent(episodes[j].Title, subtitle)
+			if subtitleOK && numberOK {
+				subtitleMatches = append(subtitleMatches, episodeNumberNarrowing{Work: &works[i], EpisodeNumber: effectiveNumber})
+			}
+			if numberOK && effectiveNumber == episodeNum {
+				if subtitleOK {
+					match := episodeNumberNarrowing{Work: &works[i], EpisodeNumber: effectiveNumber}
+					if numberAndSubtitleMatch != nil && numberAndSubtitleMatch.Work.ID != works[i].ID {
+						return nil
+					}
+					numberAndSubtitleMatch = &match
 				}
-				match = &works[i]
-				break
+				if numberMatch != nil && numberMatch.ID != works[i].ID {
+					numberAmbiguous = true
+				} else {
+					numberMatch = &works[i]
+				}
 			}
 		}
 	}
-	if match != nil {
-		return &episodeNumberNarrowing{Work: match, EpisodeNumber: episodeNum}
+	if numberAndSubtitleMatch != nil {
+		return numberAndSubtitleMatch
+	}
+	if numberMatch != nil && !numberAmbiguous {
+		return &episodeNumberNarrowing{Work: numberMatch, EpisodeNumber: episodeNum}
+	}
+	// Some EPGs use a continuous series number while Annict splits later
+	// parts into another work whose local episode numbers restart at 1. A
+	// unique exact-normalized subtitle identifies both the work and its local
+	// episode number without guessing an offset.
+	if len(subtitleMatches) == 1 {
+		return &subtitleMatches[0]
+	}
+	if numberAmbiguous {
+		return nil
 	}
 
 	// If no direct match, try to find a "第Nクール" variant with offset matching
