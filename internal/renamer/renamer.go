@@ -75,6 +75,7 @@ type RenameResult struct {
 	Subtitle     string
 	Confidence   int
 	Renamed      bool
+	Previewed    bool
 	SkipReason   string
 	Error        error
 }
@@ -202,7 +203,7 @@ func Rename(originalPath string, result *matcher.MatchResult, dryRun bool, outpu
 	}
 
 	if dryRun {
-		r.Renamed = false
+		r.Previewed = true
 		return r
 	}
 

@@ -96,6 +96,7 @@ func main() {
 	plannedDestinations := make(map[string]string)
 
 	renamed := 0
+	previewed := 0
 	skipped := 0
 	failed := 0
 
@@ -111,6 +112,8 @@ func main() {
 			skipped++
 		case result.Renamed:
 			renamed++
+		case result.Previewed:
+			previewed++
 		default:
 			skipped++
 		}
@@ -120,8 +123,11 @@ func main() {
 	fmt.Fprintf(os.Stderr, "\n--- Summary ---\n")
 	if *dryRun {
 		fmt.Fprintf(os.Stderr, "Dry-run mode: no files were renamed\n")
+		fmt.Fprintf(os.Stderr, "Would rename: %d\n", previewed)
+		fmt.Fprintf(os.Stderr, "Already organized: %d\n", renamed)
+	} else {
+		fmt.Fprintf(os.Stderr, "Renamed: %d\n", renamed)
 	}
-	fmt.Fprintf(os.Stderr, "Renamed: %d\n", renamed)
 	fmt.Fprintf(os.Stderr, "Skipped: %d\n", skipped)
 	fmt.Fprintf(os.Stderr, "Failed:  %d\n", failed)
 	if code := exitCodeForFailures(failed); code != 0 {

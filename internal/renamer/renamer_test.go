@@ -187,6 +187,9 @@ func TestRenameDryRun(t *testing.T) {
 	if r.Renamed {
 		t.Error("Rename(dry-run) should not rename files")
 	}
+	if !r.Previewed {
+		t.Error("Rename(dry-run) should mark the valid destination as previewed")
+	}
 
 	// Original file should still exist
 	if _, err := os.Stat(src); os.IsNotExist(err) {
