@@ -72,22 +72,42 @@ func NormalizeForSearch(s string) string {
 // so titles with different semantic qualifiers do not become equal.
 func NormalizeTitleForMatch(s string) string {
 	s = parentheticalYearPattern.ReplaceAllString(s, "")
-	s = strings.ToLower(Normalize(s))
+	s = strings.ToLower(NormalizeKatakanaDashes(Normalize(s)))
 	s = japaneseSeasonNumbers.Replace(s)
 	s = ordinalSeasonPattern.ReplaceAllString(s, "${1}期")
 	s = trailingFirstSeason.ReplaceAllString(s, "")
-	return strings.Map(func(r rune) rune {
+	key := strings.Map(func(r rune) rune {
 		if unicode.IsSpace(r) || isTitlePresentationRune(r) {
 			return -1
 		}
 		return r
 	}, s)
+	if key == "シュタインズゲートゼロ" {
+		return "steinsgate0"
+	}
+	if key == "ポプテピピックtvアニメーション作品第二シリーズ" {
+		return "ポプテピピック第二シリーズ"
+	}
+	return key
+}
+
+// NormalizeKatakanaDashes repairs EPG text that uses a horizontal dash where
+// a katakana prolonged sound mark belongs. Dashes used as separators remain
+// unchanged because conversion requires katakana on both sides.
+func NormalizeKatakanaDashes(s string) string {
+	runes := []rune(s)
+	for i, r := range runes {
+		if (r == '―' || r == '—') && i > 0 && i+1 < len(runes) && unicode.In(runes[i-1], unicode.Katakana) && unicode.In(runes[i+1], unicode.Katakana) {
+			runes[i] = 'ー'
+		}
+	}
+	return string(runes)
 }
 
 func isTitlePresentationRune(r rune) bool {
 	switch r {
 	case '-', '‐', '‑', '‒', '–', '—', '―',
-		'.', '・', '･', '/', '\\', ':', ';', ',', '_',
+		'.', '・', '･', '/', '\\', ':', ';', ',', '_', '~', '〜',
 		'(', ')', '[', ']', '{', '}',
 		'「', '」', '『', '』', '【', '】', '〈', '〉', '《', '》', '<', '>',
 		'"', '\'', '`', '“', '”', '‘', '’':

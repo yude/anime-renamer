@@ -301,6 +301,7 @@ func searchTitleVariants(title string) []string {
 	add(spaceBeforeInnerHyphens(title))
 	add(compactSpacesAroundHyphens(title))
 	add(compactSpaceAfterJapaneseStop(title))
+	add(normalize.NormalizeKatakanaDashes(title))
 	add(punctuationAsSpaces(title))
 	add(removeAllSpaces(title))
 	add(compactSeasonSpacing(normalizedTitle))
@@ -316,6 +317,12 @@ func searchTitleVariants(title string) []string {
 		add(baseTitle)
 		add(normalizePunctForSearch(baseTitle))
 	}
+	if baseTitle := decorativeSubtitleBase(title); baseTitle != title {
+		add(baseTitle)
+	}
+	for _, alias := range titleSearchAliases[normalize.NormalizeTitleForMatch(title)] {
+		add(alias)
+	}
 
 	if stripped := stripParentheticalSegments(title); stripped != title {
 		add(stripped)
@@ -326,6 +333,11 @@ func searchTitleVariants(title string) []string {
 		add(spaceBeforeJapaneseSeasonSuffix(normalizedStripped))
 	}
 	return variants
+}
+
+var titleSearchAliases = map[string][]string{
+	"steinsgate0": {"STEINS;GATE 0"},
+	"ポプテピピック第二シリーズ": {"ポプテピピック 第二シリーズ"},
 }
 
 func punctuationAsSpaces(s string) string {
@@ -435,6 +447,17 @@ func seriesBaseSearchTitle(s string) string {
 		return strings.TrimSpace(base)
 	}
 	return s
+}
+
+func decorativeSubtitleBase(s string) string {
+	index := strings.IndexAny(s, "~～〜")
+	if englishIndex := strings.Index(s, " -"); englishIndex >= 0 && (index < 0 || englishIndex < index) {
+		index = englishIndex
+	}
+	if index <= 0 {
+		return s
+	}
+	return strings.TrimSpace(s[:index])
 }
 
 func spaceBeforeInnerHyphens(s string) string {
