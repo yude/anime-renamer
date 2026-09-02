@@ -80,14 +80,25 @@ func isTitlePresentationRune(r rune) bool {
 // Parenthetical text containing kanji, Latin letters, or digits is preserved,
 // so meaningful qualifiers such as "(前編)" are not silently discarded.
 func NormalizeSubtitleForMatch(s string) string {
-	s = stripKanaReadingParentheses(s)
-	s = NormalizeForSearch(s)
+	s = stripKanaReadingBrackets(s)
+	s = strings.ToLower(NormalizeForSearch(s))
 	return strings.Map(func(r rune) rune {
-		if unicode.IsSpace(r) {
+		if unicode.IsSpace(r) || isSubtitlePresentationRune(r) {
 			return -1
 		}
 		return r
 	}, s)
+}
+
+func isSubtitlePresentationRune(r rune) bool {
+	switch r {
+	case '-', '‐', '‑', '‒', '–', '—', '―',
+		'"', '\'', '`', '“', '”', '‘', '’',
+		'「', '」', '『', '』', '【', '】', '[', ']', '［', '］':
+		return true
+	default:
+		return false
+	}
 }
 
 // Compare compares two strings after normalization.
@@ -260,24 +271,21 @@ func stripBracketContent(s string, open, close rune) string {
 	return strings.TrimSpace(result)
 }
 
-// stripKanaReadingParentheses removes parenthetical kana readings embedded in
-// a subtitle. A parenthesized-only subtitle is left intact: reading aids need
-// a base expression immediately before the opening parenthesis.
-func stripKanaReadingParentheses(s string) string {
+// stripKanaReadingBrackets removes kana readings embedded in parentheses or
+// square-style brackets. A bracketed-only subtitle is left intact: reading
+// aids need a base expression immediately before the opening bracket.
+func stripKanaReadingBrackets(s string) string {
 	runes := []rune(s)
 	var b strings.Builder
 
 	for i := 0; i < len(runes); {
-		if runes[i] != '(' && runes[i] != '（' {
+		close, ok := readingBracketClose(runes[i])
+		if !ok {
 			b.WriteRune(runes[i])
 			i++
 			continue
 		}
 
-		close := ')'
-		if runes[i] == '（' {
-			close = '）'
-		}
 		end := i + 1
 		for end < len(runes) && runes[end] != close {
 			end++
@@ -293,6 +301,23 @@ func stripKanaReadingParentheses(s string) string {
 	}
 
 	return b.String()
+}
+
+func readingBracketClose(open rune) (rune, bool) {
+	switch open {
+	case '(':
+		return ')', true
+	case '（':
+		return '）', true
+	case '[':
+		return ']', true
+	case '［':
+		return '］', true
+	case '【':
+		return '】', true
+	default:
+		return 0, false
+	}
 }
 
 func hasReadingBase(runes []rune, openingIndex int) bool {

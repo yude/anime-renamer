@@ -549,6 +549,25 @@ func TestMatchSubtitleDoesNotDropMeaningfulParentheticalQualifier(t *testing.T) 
 	}
 }
 
+func TestMatchSubtitlePresentationVariantsReachThreshold(t *testing.T) {
+	works := []annict.Work{{ID: 1, Title: "作品"}}
+	for i, tt := range []struct {
+		annict string
+		file   string
+	}{
+		{annict: "Ez Do Dance", file: "EZ DO DANCE"},
+		{annict: "顔の無い王 ノーフェイス・メイキング", file: "顔の無い王—ノーフェイス・メイキング—"},
+		{annict: "紅い瞳の魔法使い達【ウィザーズ】", file: "紅い瞳の魔法使い達(ウィザーズ)"},
+	} {
+		episodes := map[int][]annict.Episode{1: {{ID: 100 + i, Number: float64Ptr(1), Title: tt.annict}}}
+		meta := &parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 1, Subtitle: tt.file}
+		result := Match(meta, works, episodes, nil)
+		if result == nil || result.Confidence < AutoRenameThreshold {
+			t.Errorf("Match(%q, %q) = %+v, want confidence >= %d", tt.annict, tt.file, result, AutoRenameThreshold)
+		}
+	}
+}
+
 func TestMatchingWorksIgnoresTitlePresentationPunctuation(t *testing.T) {
 	works := []annict.Work{
 		{ID: 1, Title: "16bitセンセーション ANOTHER LAYER"},

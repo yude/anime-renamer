@@ -104,6 +104,21 @@ func TestNormalizeSubtitleForMatch(t *testing.T) {
 			expected: "超常対決!巨人vs巨人!",
 		},
 		{
+			name:     "ASCII letter case",
+			input:    "EZ DO DANCE",
+			expected: "ezdodance",
+		},
+		{
+			name:     "em dash is presentation only",
+			input:    "顔の無い王—ノーフェイス—",
+			expected: "顔の無い王ノーフエイス",
+		},
+		{
+			name:     "square bracket katakana reading",
+			input:    "紅い瞳の魔法使い達【ウィザーズ】",
+			expected: "紅い瞳の魔法使い達",
+		},
+		{
 			name:     "meaningful kanji qualifier is preserved",
 			input:    "決戦（前編）",
 			expected: "決戦前編",
