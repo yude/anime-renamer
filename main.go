@@ -241,6 +241,20 @@ func processFile(
 			Error:        fmt.Errorf("no match found for %q", meta.WorkTitle),
 		}
 	}
+	usedRelatedWorks := false
+	if result.Episode == nil {
+		relatedWorks, relatedErr := searchRelatedWorks(client, c, meta.WorkTitle, workCache, episodesCache)
+		if relatedErr != nil {
+			if verbose {
+				fmt.Fprintf(os.Stderr, "  Warning: could not search related seasons: %v\n", relatedErr)
+			}
+		} else if relatedResult := matcher.MatchRelated(meta, relatedWorks, episodesCache, nil); relatedResult != nil && relatedResult.Episode != nil {
+			works = relatedWorks
+			result = relatedResult
+			usedRelatedWorks = true
+			fmt.Fprintf(os.Stderr, "  Fallback:  matched an explicitly named related season\n")
+		}
+	}
 
 	// Step 5: Fetch programs only when date verification can change the
 	// threshold decision, or when verbose output explicitly requests program
@@ -259,9 +273,12 @@ func processFile(
 				fmt.Fprintf(os.Stderr, "  Programs: %d for %q\n", len(programs), result.Work.Title)
 			}
 			if len(programs) > 0 {
-				result = matcher.Match(meta, works, episodesCache, map[int][]annict.Program{
-					result.Work.ID: programs,
-				})
+				programsByWork := map[int][]annict.Program{result.Work.ID: programs}
+				if usedRelatedWorks {
+					result = matcher.MatchRelated(meta, works, episodesCache, programsByWork)
+				} else {
+					result = matcher.Match(meta, works, episodesCache, programsByWork)
+				}
 			}
 		}
 	}
@@ -398,6 +415,40 @@ func searchWork(client *annict.Client, c *cache.Cache, title string, wc map[stri
 		_ = c.SetEpisodes(w.ID, episodes)
 	}
 
+	return works, nil
+}
+
+const relatedWorkCachePrefix = "\x00related:"
+
+func searchRelatedWorks(client *annict.Client, c *cache.Cache, title string, wc map[string][]annict.Work, ec map[int][]annict.Episode) ([]annict.Work, error) {
+	cacheKey := relatedWorkCachePrefix + title
+	if works, ok := wc[cacheKey]; ok {
+		return works, nil
+	}
+
+	works, episodesByWork, err := client.SearchWorks(title)
+	if err != nil {
+		return nil, err
+	}
+	works = matcher.MatchingRelatedWorks(title, works)
+	wc[cacheKey] = works
+
+	for _, work := range works {
+		if episodes, ok := episodesByWork[work.ID]; ok && episodesComplete(work, episodes) {
+			if _, cached := ec[work.ID]; !cached {
+				ec[work.ID] = episodes
+				_ = c.SetEpisodes(work.ID, episodes)
+			}
+		}
+	}
+	for _, work := range works {
+		if _, ok := ec[work.ID]; ok {
+			continue
+		}
+		if _, err := getEpisodes(client, c, work.ID, ec); err != nil {
+			return nil, fmt.Errorf("get episodes for related work %q: %w", work.Title, err)
+		}
+	}
 	return works, nil
 }
 

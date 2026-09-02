@@ -498,6 +498,49 @@ func TestProcessFileUsesDirectoryTitleAfterEmptyFilenameSearch(t *testing.T) {
 	}
 }
 
+func TestProcessFileRetriesExplicitRelatedSeasonAfterMissingEpisode(t *testing.T) {
+	graphqlRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/graphql" {
+			http.NotFound(w, r)
+			return
+		}
+		graphqlRequests++
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[
+			{"node":{"annictId":1,"title":"作品","seasonName":"WINTER","seasonYear":2025,"episodesCount":1,"episodes":{"edges":[{"node":{"annictId":101,"number":1,"sortNumber":1,"title":"第一話"}}]}}},
+			{"node":{"annictId":2,"title":"作品 第2期","seasonName":"WINTER","seasonYear":2026,"episodesCount":1,"episodes":{"edges":[{"node":{"annictId":201,"number":13,"sortNumber":1,"title":"再会"}}]}}}
+		]}}}`)
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "作品 #13「再会」.mp4")
+	if err := os.WriteFile(file, []byte("recording"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	client := annict.NewClientWithURLs("token", server.URL, server.URL+"/graphql")
+	result := processFile(
+		file,
+		client,
+		cache.NewDisabled(filepath.Join(dir, "cache")),
+		make(map[string][]annict.Work),
+		make(map[int][]annict.Episode),
+		make(map[programsCacheKey][]annict.Program),
+		make(map[string]string),
+		true,
+		false,
+		matcher.AutoRenameThreshold,
+		"",
+	)
+	if result.Error != nil || result.WorkTitle != "作品 第2期" || result.EpisodeNum != 13 || !result.Previewed {
+		t.Fatalf("processFile() = %+v, want related season episode 13 preview", result)
+	}
+	if graphqlRequests != 2 {
+		t.Errorf("GraphQL requests = %d, want initial search plus one related-season retry", graphqlRequests)
+	}
+}
+
 func TestProcessFileNoEpisodeDoesNotContactAnnict(t *testing.T) {
 	testProcessFileSkippedWithoutAnnict(t, "作品 総集編 (20260801).mp4", "no supported single episode number")
 }

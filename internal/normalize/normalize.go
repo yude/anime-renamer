@@ -1,11 +1,14 @@
 package normalize
 
 import (
+	"regexp"
 	"strings"
 	"unicode"
 
 	"golang.org/x/text/unicode/norm"
 )
+
+var parentheticalYearPattern = regexp.MustCompile(`[（(][0-9０-９]{4}(?:年版)?[）)]`)
 
 // Normalize applies NFKC normalization and full-width to half-width conversion.
 func Normalize(s string) string {
@@ -51,6 +54,7 @@ func NormalizeForSearch(s string) string {
 // deliberately retains every letter and number, including season/cour digits,
 // so titles with different semantic qualifiers do not become equal.
 func NormalizeTitleForMatch(s string) string {
+	s = parentheticalYearPattern.ReplaceAllString(s, "")
 	s = strings.ToLower(Normalize(s))
 	return strings.Map(func(r rune) rune {
 		if unicode.IsSpace(r) || isTitlePresentationRune(r) {

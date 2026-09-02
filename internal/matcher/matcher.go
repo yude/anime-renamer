@@ -3,6 +3,7 @@ package matcher
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -26,6 +27,8 @@ type MatchResult struct {
 const (
 	AutoRenameThreshold = 90
 )
+
+var seriesContinuationPattern = regexp.MustCompile(`^(?:第[0-9]+(?:期|クール)|season[0-9]+|[0-9]+(?:st|nd|rd|th)(?:season|シーズン)|シーズン[0-9]+|[0-9]+期)`)
 
 // Season mapping from month to Annict season name. Each season is exactly
 // a 3-month cour: winter=Jan-Mar, spring=Apr-Jun, summer=Jul-Sep,
@@ -51,12 +54,26 @@ func SeasonYearFromMonth(t time.Time) int {
 
 // Match attempts to match parsed metadata against Annict data.
 func Match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork map[int][]annict.Episode, programsByWork map[int][]annict.Program) *MatchResult {
+	return match(meta, works, episodesByWork, programsByWork, false)
+}
+
+// MatchRelated is the retry path for an exact base work whose episode could
+// not be found. It additionally considers explicitly named later seasons, but
+// still excludes movies, OVAs, and specials that merely share a title prefix.
+func MatchRelated(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork map[int][]annict.Episode, programsByWork map[int][]annict.Program) *MatchResult {
+	return match(meta, works, episodesByWork, programsByWork, true)
+}
+
+func match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork map[int][]annict.Episode, programsByWork map[int][]annict.Program, includeRelated bool) *MatchResult {
 	if len(works) == 0 {
 		return nil
 	}
 
 	// Step 1: Find matching works
 	candidateWorks := MatchingWorks(meta.WorkTitle, works)
+	if includeRelated {
+		candidateWorks = MatchingRelatedWorks(meta.WorkTitle, works)
+	}
 	if len(candidateWorks) == 0 {
 		return nil
 	}
@@ -166,7 +183,12 @@ func Match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 			result.Reasons = append(result.Reasons, "work title match")
 
 			result.Confidence += 30
-			result.Reasons = append(result.Reasons, fmt.Sprintf("episode number %d matched", episodeNumberForMatch))
+			matchedNumber, _ := EpisodeNumber(episode)
+			if matchedNumber == episodeNumberForMatch {
+				result.Reasons = append(result.Reasons, fmt.Sprintf("episode number %d matched", episodeNumberForMatch))
+			} else {
+				result.Reasons = append(result.Reasons, fmt.Sprintf("unique subtitle mapped file episode %d to Annict episode %d", episodeNumberForMatch, matchedNumber))
+			}
 
 			if meta.Subtitle == "" {
 				result.Confidence += 20
@@ -244,6 +266,31 @@ func MatchingWorks(title string, works []annict.Work) []annict.Work {
 		}
 	}
 
+	return matches
+}
+
+// MatchingRelatedWorks expands an exact base-title match with only explicit
+// season/cour continuations. Callers use it after the base work failed to
+// provide the requested episode, never as the first-pass candidate set.
+func MatchingRelatedWorks(title string, works []annict.Work) []annict.Work {
+	matches := MatchingWorks(title, works)
+	if len(matches) == 0 {
+		return nil
+	}
+	baseTitle := normalize.NormalizeTitleForMatch(title)
+	seen := make(map[int]bool, len(matches))
+	for _, work := range matches {
+		seen[work.ID] = true
+	}
+	for _, work := range works {
+		if seen[work.ID] {
+			continue
+		}
+		workTitle := normalize.NormalizeTitleForMatch(work.Title)
+		if strings.HasPrefix(workTitle, baseTitle) && seriesContinuationPattern.MatchString(strings.TrimPrefix(workTitle, baseTitle)) {
+			matches = append(matches, work)
+		}
+	}
 	return matches
 }
 
@@ -409,6 +456,8 @@ func episodeNumberMatches(e *annict.Episode, number int) bool {
 func findMatchingEpisode(number int, subtitle string, episodes []annict.Episode) *annict.Episode {
 	var numberMatch *annict.Episode
 	var numberAndSubtitleMatch *annict.Episode
+	var subtitleMatch *annict.Episode
+	subtitleAmbiguous := false
 
 	for i := range episodes {
 		e := &episodes[i]
@@ -423,6 +472,14 @@ func findMatchingEpisode(number int, subtitle string, episodes []annict.Episode)
 				}
 			}
 		}
+		_, validEpisodeNumber := EpisodeNumber(e)
+		if validEpisodeNumber && subtitle != "" && e.Title != "" && subtitlesEquivalent(e.Title, subtitle) {
+			if subtitleMatch != nil && subtitleMatch.ID != e.ID {
+				subtitleAmbiguous = true
+			} else {
+				subtitleMatch = e
+			}
+		}
 	}
 
 	// Prefer exact number+subtitle match
@@ -432,6 +489,9 @@ func findMatchingEpisode(number int, subtitle string, episodes []annict.Episode)
 	// Fall back to number-only match
 	if numberMatch != nil {
 		return numberMatch
+	}
+	if subtitleMatch != nil && !subtitleAmbiguous {
+		return subtitleMatch
 	}
 	return nil
 }

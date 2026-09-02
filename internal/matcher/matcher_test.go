@@ -389,8 +389,10 @@ func TestNarrowByEpisodeNumberRejectsSubtitleSharedAcrossWorks(t *testing.T) {
 
 func TestFractionalEpisodeNumberDoesNotMatchIntegerInput(t *testing.T) {
 	episodes := []annict.Episode{{ID: 101, Number: float64Ptr(7.5), SortNumber: 7, Title: "特別話"}}
-	if got := findMatchingEpisode(7, "", episodes); got != nil {
-		t.Errorf("findMatchingEpisode() = %+v, want nil for fractional episode 7.5", got)
+	for _, subtitle := range []string{"", "特別話"} {
+		if got := findMatchingEpisode(7, subtitle, episodes); got != nil {
+			t.Errorf("findMatchingEpisode(7, %q) = %+v, want nil for fractional episode 7.5", subtitle, got)
+		}
 	}
 	if number, ok := EpisodeNumber(&episodes[0]); ok || number != 0 {
 		t.Errorf("EpisodeNumber() = %d, %v; want 0, false for fractional number", number, ok)
@@ -611,6 +613,45 @@ func TestMatchingWorksIgnoresTitlePresentationPunctuation(t *testing.T) {
 	got := MatchingWorks("16bitセンセーション -ANOTHER LAYER-", works)
 	if len(got) != 1 || got[0].ID != 1 {
 		t.Errorf("MatchingWorks() = %+v, want only the punctuation-equivalent main work", got)
+	}
+}
+
+func TestMatchingRelatedWorksIncludesOnlyExplicitSeriesContinuations(t *testing.T) {
+	works := []annict.Work{
+		{ID: 1, Title: "【推しの子】"},
+		{ID: 2, Title: "【推しの子】第2期"},
+		{ID: 3, Title: "【推しの子】 Season 3"},
+		{ID: 4, Title: "【推しの子】 Mother and Children"},
+	}
+	got := MatchingRelatedWorks("【推しの子】", works)
+	if len(got) != 3 || got[0].ID != 1 || got[1].ID != 2 || got[2].ID != 3 {
+		t.Errorf("MatchingWorks() = %+v, want base work and explicit seasons only", got)
+	}
+}
+
+func TestMatchMapsMissingNumberByUniqueSubtitleWithinWork(t *testing.T) {
+	works := []annict.Work{{ID: 1, Title: "作品 2nd"}}
+	episodes := map[int][]annict.Episode{1: {
+		{ID: 101, Number: float64Ptr(1), Title: "後半開始"},
+		{ID: 102, Number: float64Ptr(2), Title: "再会"},
+	}}
+	meta := &parser.RecordingMetadata{WorkTitle: "作品 2nd", EpisodeNumber: 14, Subtitle: "後半開始"}
+	result := Match(meta, works, episodes, nil)
+	if result == nil || result.Episode == nil || result.Episode.ID != 101 || result.Confidence < AutoRenameThreshold {
+		t.Errorf("Match() = %+v, want unique subtitle mapped to local episode 1", result)
+	}
+}
+
+func TestMatchDoesNotMapMissingNumberByDuplicateSubtitle(t *testing.T) {
+	works := []annict.Work{{ID: 1, Title: "作品"}}
+	episodes := map[int][]annict.Episode{1: {
+		{ID: 101, Number: float64Ptr(1), Title: "総集編"},
+		{ID: 102, Number: float64Ptr(2), Title: "総集編"},
+	}}
+	meta := &parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 14, Subtitle: "総集編"}
+	result := Match(meta, works, episodes, nil)
+	if result == nil || result.Episode != nil || result.Confidence >= AutoRenameThreshold {
+		t.Errorf("Match() = %+v, want unresolved duplicate subtitle", result)
 	}
 }
 

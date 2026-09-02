@@ -72,6 +72,7 @@ func TestNormalizeTitleForMatch(t *testing.T) {
 		{a: "16bitセンセーション -ANOTHER LAYER-", b: "16bitセンセーション ANOTHER LAYER", eq: true},
 		{a: "ひぐらしのなく頃に 卒", b: "ひぐらしのなく頃に卒", eq: true},
 		{a: "プリンセスコネクト！Re：Dive", b: "プリンセスコネクト!re:dive", eq: true},
+		{a: "うる星やつら(2022)", b: "うる星やつら", eq: true},
 		{a: "けいおん！", b: "けいおん！！", eq: false},
 		{a: "作品 第2期", b: "作品 第3期", eq: false},
 	} {
