@@ -8,7 +8,24 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
-var parentheticalYearPattern = regexp.MustCompile(`[（(][0-9０-９]{4}(?:年版)?[）)]`)
+var (
+	parentheticalYearPattern = regexp.MustCompile(`[（(][0-9０-９]{4}(?:年版)?[）)]`)
+	ordinalSeasonPattern     = regexp.MustCompile(`第([0-9]+)期`)
+	trailingFirstSeason      = regexp.MustCompile(`1期$`)
+)
+
+var japaneseSeasonNumbers = strings.NewReplacer(
+	"第一期", "第1期",
+	"第二期", "第2期",
+	"第三期", "第3期",
+	"第四期", "第4期",
+	"第五期", "第5期",
+	"第六期", "第6期",
+	"第七期", "第7期",
+	"第八期", "第8期",
+	"第九期", "第9期",
+	"第十期", "第10期",
+)
 
 // Normalize applies NFKC normalization and full-width to half-width conversion.
 func Normalize(s string) string {
@@ -56,6 +73,9 @@ func NormalizeForSearch(s string) string {
 func NormalizeTitleForMatch(s string) string {
 	s = parentheticalYearPattern.ReplaceAllString(s, "")
 	s = strings.ToLower(Normalize(s))
+	s = japaneseSeasonNumbers.Replace(s)
+	s = ordinalSeasonPattern.ReplaceAllString(s, "${1}期")
+	s = trailingFirstSeason.ReplaceAllString(s, "")
 	return strings.Map(func(r rune) rune {
 		if unicode.IsSpace(r) || isTitlePresentationRune(r) {
 			return -1

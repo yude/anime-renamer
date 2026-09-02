@@ -289,29 +289,41 @@ func searchTitleVariants(title string) []string {
 		seen[value] = true
 		variants = append(variants, value)
 	}
+	normalizedTitle := normalize.Normalize(title)
 
 	add(title)
 	add(normalizePunctForSearch(title))
 	add(mixedExclamationWidth(title))
 	add(spaceBeforeParenthetical(mixedExclamationWidth(title)))
-	add(normalize.Normalize(title))
-	add(normalizePunctForSearch(normalize.Normalize(title)))
+	add(normalizedTitle)
+	add(normalizePunctForSearch(normalizedTitle))
 	add(normalize.NormalizeForSearch(title))
 	add(spaceBeforeInnerHyphens(title))
 	add(compactSpacesAroundHyphens(title))
+	add(compactSpaceAfterJapaneseStop(title))
 	add(punctuationAsSpaces(title))
 	add(removeAllSpaces(title))
-	add(compactSeasonSpacing(normalize.Normalize(title)))
-	add(normalizePunctForSearch(compactSeasonSpacing(normalize.Normalize(title))))
-	add(expandTrailingASCIISuffix(normalize.Normalize(title)))
-	add(spaceBeforeJapaneseSeasonSuffix(normalize.Normalize(title)))
+	add(compactSeasonSpacing(normalizedTitle))
+	add(normalizePunctForSearch(compactSeasonSpacing(normalizedTitle)))
+	add(expandTrailingASCIISuffix(normalizedTitle))
+	add(spaceBeforeJapaneseSeasonSuffix(normalizedTitle))
+	if baseTitle := seriesBaseSearchTitle(title); baseTitle != title {
+		add(baseTitle)
+		add(mixedExclamationWidth(baseTitle))
+		add(normalizePunctForSearch(normalize.Normalize(baseTitle)))
+	}
+	if baseTitle := seriesBaseSearchTitle(normalizedTitle); baseTitle != normalizedTitle {
+		add(baseTitle)
+		add(normalizePunctForSearch(baseTitle))
+	}
 
 	if stripped := stripParentheticalSegments(title); stripped != title {
 		add(stripped)
-		add(normalize.Normalize(stripped))
+		normalizedStripped := normalize.Normalize(stripped)
+		add(normalizedStripped)
 		add(normalize.NormalizeForSearch(stripped))
 		add(punctuationAsSpaces(stripped))
-		add(spaceBeforeJapaneseSeasonSuffix(normalize.Normalize(stripped)))
+		add(spaceBeforeJapaneseSeasonSuffix(normalizedStripped))
 	}
 	return variants
 }
@@ -329,6 +341,18 @@ var spacesAroundHyphenPattern = regexp.MustCompile(`\s*([-－―])\s*`)
 
 func compactSpacesAroundHyphens(s string) string {
 	return spacesAroundHyphenPattern.ReplaceAllString(s, "$1")
+}
+
+func compactSpaceAfterJapaneseStop(s string) string {
+	runes := []rune(s)
+	var b strings.Builder
+	for i, r := range runes {
+		if unicode.IsSpace(r) && i > 0 && runes[i-1] == '。' {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 func removeAllSpaces(s string) string {
@@ -381,6 +405,9 @@ var (
 	trailingLatinNumber      = regexp.MustCompile(`([A-Za-z])([0-9]+)$`)
 	trailingRomanNumeral     = regexp.MustCompile(`([0-9])([IVX]+)$`)
 	japaneseSeasonSuffix     = regexp.MustCompile(`(\S)(第[0-9]+(?:期|クール))$`)
+	japaneseSeriesSuffix     = regexp.MustCompile(`\s*[（(]?\s*第?[0-9一二三四五六七八九十]+期.*$`)
+	englishSeriesSuffix      = regexp.MustCompile(`(?i)\s+(?:season\s*[0-9]+|[0-9]+(?:st|nd|rd|th)\s+season).*$`)
+	romanSeriesSuffix        = regexp.MustCompile(`(?i)([^a-z])(?:[ivxＸ]+|[ⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+)(?:\s+.*)?$`)
 )
 
 func compactSeasonSpacing(s string) string {
@@ -395,6 +422,19 @@ func expandTrailingASCIISuffix(s string) string {
 
 func spaceBeforeJapaneseSeasonSuffix(s string) string {
 	return japaneseSeasonSuffix.ReplaceAllString(s, "$1 $2")
+}
+
+func seriesBaseSearchTitle(s string) string {
+	if base := japaneseSeriesSuffix.ReplaceAllString(s, ""); base != s {
+		return strings.TrimSpace(base)
+	}
+	if base := englishSeriesSuffix.ReplaceAllString(s, ""); base != s {
+		return strings.TrimSpace(base)
+	}
+	if base := romanSeriesSuffix.ReplaceAllString(s, "$1"); base != s {
+		return strings.TrimSpace(base)
+	}
+	return s
 }
 
 func spaceBeforeInnerHyphens(s string) string {
