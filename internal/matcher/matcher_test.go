@@ -586,6 +586,25 @@ func TestMatchSubtitleDoesNotDropMeaningfulParentheticalQualifier(t *testing.T) 
 	}
 }
 
+func TestSubtitlesEquivalentForScoringToleratesOnlyOneLongSubtitleInsertion(t *testing.T) {
+	for _, tt := range []struct {
+		a, b string
+		want bool
+	}{
+		{a: "零化域のミッシングリンク", b: "零化領域のミッシングリンク", want: true},
+		{a: "決戦前編", b: "決戦後編", want: false},
+		{a: "とても長いサブタイトル甲", b: "とても長いサブタイトル乙", want: false},
+		{a: "長いサブタイトル", b: "長いサブタイトル補足", want: false},
+	} {
+		if got := subtitlesEquivalentForScoring(tt.a, tt.b); got != tt.want {
+			t.Errorf("subtitlesEquivalentForScoring(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.want)
+		}
+	}
+	if subtitlesEquivalent("零化域のミッシングリンク", "零化領域のミッシングリンク") {
+		t.Error("subtitlesEquivalent accepted a typo during candidate selection")
+	}
+}
+
 func TestMatchSubtitlePresentationVariantsReachThreshold(t *testing.T) {
 	works := []annict.Work{{ID: 1, Title: "作品"}}
 	for i, tt := range []struct {

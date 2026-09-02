@@ -200,7 +200,7 @@ func match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 			} else if normalize.Compare(episode.Title, meta.Subtitle) {
 				result.Confidence += 20
 				result.Reasons = append(result.Reasons, "subtitle exact match")
-			} else if subtitlesEquivalent(episode.Title, meta.Subtitle) {
+			} else if subtitlesEquivalentForScoring(episode.Title, meta.Subtitle) {
 				result.Confidence += 20
 				result.Reasons = append(result.Reasons, fmt.Sprintf("subtitle normalized match: annict=%q, file=%q", episode.Title, meta.Subtitle))
 			} else if subtitlePartialMatch(episode.Title, meta.Subtitle) {
@@ -564,6 +564,37 @@ func subtitlesEquivalent(a, b string) bool {
 	na := normalize.NormalizeSubtitleForMatch(a)
 	nb := normalize.NormalizeSubtitleForMatch(b)
 	return na != "" && nb != "" && na == nb
+}
+
+// subtitlesEquivalentForScoring permits a minor EPG omission only after the
+// work and integer episode number have already selected one Annict episode.
+// Candidate selection deliberately continues to use subtitlesEquivalent.
+func subtitlesEquivalentForScoring(a, b string) bool {
+	na := normalize.NormalizeSubtitleForMatch(a)
+	nb := normalize.NormalizeSubtitleForMatch(b)
+	return na != "" && nb != "" && (na == nb || oneRuneInsertionApart([]rune(na), []rune(nb)))
+}
+
+// oneRuneInsertionApart tolerates one omitted or duplicated character only in
+// long subtitles. It intentionally rejects substitutions and short qualifiers
+// such as 前編/後編, which are too semantically significant to blur.
+func oneRuneInsertionApart(a, b []rune) bool {
+	if len(a) > len(b) {
+		a, b = b, a
+	}
+	if len(b) < 10 || len(b)-len(a) != 1 {
+		return false
+	}
+	for i, j := 0, 0; i < len(a); i, j = i+1, j+1 {
+		if a[i] == b[j] {
+			continue
+		}
+		j++
+		if j >= len(b) || a[i] != b[j] {
+			return false
+		}
+	}
+	return true
 }
 
 // contains checks if s contains substr.
