@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -279,7 +280,7 @@ func (c *Client) searchWorksGraphQL(title string) ([]Work, map[int][]Episode, er
 // and matcher.MatchingWorks performs the strict post-filtering step.
 func searchTitleVariants(title string) []string {
 	seen := make(map[string]bool)
-	variants := make([]string, 0, 10)
+	variants := make([]string, 0, 16)
 	add := func(value string) {
 		value = normalize.CollapseSpaces(strings.TrimSpace(value))
 		if value == "" || seen[value] {
@@ -291,16 +292,26 @@ func searchTitleVariants(title string) []string {
 
 	add(title)
 	add(normalizePunctForSearch(title))
+	add(mixedExclamationWidth(title))
+	add(spaceBeforeParenthetical(mixedExclamationWidth(title)))
 	add(normalize.Normalize(title))
+	add(normalizePunctForSearch(normalize.Normalize(title)))
 	add(normalize.NormalizeForSearch(title))
 	add(spaceBeforeInnerHyphens(title))
+	add(compactSpacesAroundHyphens(title))
 	add(punctuationAsSpaces(title))
+	add(removeAllSpaces(title))
+	add(compactSeasonSpacing(normalize.Normalize(title)))
+	add(normalizePunctForSearch(compactSeasonSpacing(normalize.Normalize(title))))
+	add(expandTrailingASCIISuffix(normalize.Normalize(title)))
+	add(spaceBeforeJapaneseSeasonSuffix(normalize.Normalize(title)))
 
 	if stripped := stripParentheticalSegments(title); stripped != title {
 		add(stripped)
 		add(normalize.Normalize(stripped))
 		add(normalize.NormalizeForSearch(stripped))
 		add(punctuationAsSpaces(stripped))
+		add(spaceBeforeJapaneseSeasonSuffix(normalize.Normalize(stripped)))
 	}
 	return variants
 }
@@ -314,11 +325,83 @@ func punctuationAsSpaces(s string) string {
 	}, s)
 }
 
+var spacesAroundHyphenPattern = regexp.MustCompile(`\s*([-－―])\s*`)
+
+func compactSpacesAroundHyphens(s string) string {
+	return spacesAroundHyphenPattern.ReplaceAllString(s, "$1")
+}
+
+func removeAllSpaces(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+func mixedExclamationWidth(s string) string {
+	runes := []rune(s)
+	var b strings.Builder
+	for i := 0; i < len(runes); {
+		if runes[i] != '!' && runes[i] != '！' {
+			b.WriteRune(runes[i])
+			i++
+			continue
+		}
+		end := i + 1
+		for end < len(runes) && (runes[end] == '!' || runes[end] == '！') {
+			end++
+		}
+		if end-i == 1 {
+			b.WriteRune('！')
+		} else {
+			b.WriteString(strings.Repeat("!", end-i))
+		}
+		i = end
+	}
+	return b.String()
+}
+
+func spaceBeforeParenthetical(s string) string {
+	runes := []rune(s)
+	var b strings.Builder
+	for i, r := range runes {
+		if (r == '(' || r == '（') && i > 0 && !unicode.IsSpace(runes[i-1]) {
+			b.WriteRune(' ')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+var (
+	seasonNumberSpacePattern = regexp.MustCompile(`(?i)(season)\s+([0-9]+)$`)
+	ordinalSeasonGapPattern  = regexp.MustCompile(`(?i)\s+([0-9]+(?:st|nd|rd|th)\s+season)$`)
+	trailingLatinNumber      = regexp.MustCompile(`([A-Za-z])([0-9]+)$`)
+	trailingRomanNumeral     = regexp.MustCompile(`([0-9])([IVX]+)$`)
+	japaneseSeasonSuffix     = regexp.MustCompile(`(\S)(第[0-9]+(?:期|クール))$`)
+)
+
+func compactSeasonSpacing(s string) string {
+	s = seasonNumberSpacePattern.ReplaceAllString(s, "$1$2")
+	return ordinalSeasonGapPattern.ReplaceAllString(s, "$1")
+}
+
+func expandTrailingASCIISuffix(s string) string {
+	s = trailingLatinNumber.ReplaceAllString(s, "$1 $2")
+	return trailingRomanNumeral.ReplaceAllString(s, "$1 $2")
+}
+
+func spaceBeforeJapaneseSeasonSuffix(s string) string {
+	return japaneseSeasonSuffix.ReplaceAllString(s, "$1 $2")
+}
+
 func spaceBeforeInnerHyphens(s string) string {
 	runes := []rune(s)
 	var b strings.Builder
 	for i, r := range runes {
-		if (r == '-' || r == '－') && i > 0 && i+1 < len(runes) && !unicode.IsSpace(runes[i-1]) && !unicode.IsSpace(runes[i+1]) {
+		if (r == '-' || r == '－' || r == '―') && i > 0 && i+1 < len(runes) && !unicode.IsSpace(runes[i-1]) && !unicode.IsSpace(runes[i+1]) {
 			b.WriteRune(' ')
 		}
 		b.WriteRune(r)

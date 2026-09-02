@@ -21,6 +21,18 @@ func TestSearchTitleVariants(t *testing.T) {
 		{input: "16bitセンセーション -ANOTHER LAYER-", want: "16bitセンセーション ANOTHER LAYER"},
 		{input: "2．5次元の誘惑(リリサ)", want: "2.5次元の誘惑"},
 		{input: "ATRI-My Dear Moments-", want: "ATRI -My Dear Moments-"},
+		{input: "ひぐらしのなく頃に 卒", want: "ひぐらしのなく頃に卒"},
+		{input: "かぐや様は告らせたい -ウルトラロマンティック-", want: "かぐや様は告らせたい-ウルトラロマンティック-"},
+		{input: "チ。―地球の運動について―", want: "チ。 ―地球の運動について―"},
+		{input: "モブサイコ100III", want: "モブサイコ100 III"},
+		{input: "盾の勇者の成り上がり Season 2", want: "盾の勇者の成り上がり Season2"},
+		{input: "はたらく魔王さま！！ 2nd Season", want: "はたらく魔王さま!!2nd Season"},
+		{input: "はたらく魔王さま！！ 2nd Season", want: "はたらく魔王さま！！2nd Season"},
+		{input: "ＴＳＵＫＩＰＲＯ ＴＨＥ ＡＮＩＭＡＴＩＯＮ２", want: "TSUKIPRO THE ANIMATION 2"},
+		{input: "プリンセスコネクト！Re：Dive", want: "プリンセスコネクト！Re:Dive"},
+		{input: "ラブライブ！サンシャイン！！", want: "ラブライブ！サンシャイン!!"},
+		{input: "ラブライブ！サンシャイン！！(第2期)", want: "ラブライブ！サンシャイン!! (第2期)"},
+		{input: "うる星やつら(2022)第2期", want: "うる星やつら 第2期"},
 	} {
 		if got := searchTitleVariants(tt.input); !slices.Contains(got, tt.want) {
 			t.Errorf("searchTitleVariants(%q) = %q, want variant %q", tt.input, got, tt.want)
