@@ -712,6 +712,27 @@ func TestParseFilename(t *testing.T) {
 			wantTitle: "作品 9話までを振り返りスペシャル",
 			wantEp:    0,
 		},
+		{
+			name:      "subtitle hex color is not another episode",
+			input:     "Opus.COLORs #05 「灰空の霹靂 #6E60A8」.mp4",
+			wantTitle: "Opus.COLORs",
+			wantEp:    5,
+			wantSub:   "灰空の霹靂 #6E60A8",
+		},
+		{
+			name:      "subtitle hash chapter is not another episode",
+			input:     "グリザイア：ファントムトリガー #01「マザーズクレイドル#1」.mp4",
+			wantTitle: "グリザイア：ファントムトリガー",
+			wantEp:    1,
+			wantSub:   "マザーズクレイドル#1",
+		},
+		{
+			name:      "later broadcast notice is not part of this recording",
+			input:     "[新]アニメA・転生賢者の異世界ライフ ＃１ ※＃２は25時から放送します (2022_07_06).mp4",
+			wantTitle: "転生賢者の異世界ライフ",
+			wantEp:    1,
+			wantDate:  time.Date(2022, 7, 6, 0, 0, 0, 0, jst),
+		},
 
 		// === Error cases ===
 		{
@@ -752,6 +773,21 @@ func TestParseFilename(t *testing.T) {
 		{
 			name:    "multiple hash episodes are rejected",
 			input:   "作品 #01,02「第一話 ／ 第二話」.mp4",
+			wantErr: true,
+		},
+		{
+			name:    "multiple numbers before episode suffix are rejected",
+			input:   "作品 第01,02,03話「第一話 ／ 第二話 ／ 第三話」.mp4",
+			wantErr: true,
+		},
+		{
+			name:    "separated hash episodes are rejected",
+			input:   "作品 #01「第一話」 ／ #16「第十六話」.mp4",
+			wantErr: true,
+		},
+		{
+			name:    "adjacent quoted hash episodes are rejected",
+			input:   "作品 #1「第一話」#2「第二話」.mp4",
 			wantErr: true,
 		},
 		{
