@@ -177,3 +177,9 @@ func TestCollapseSpaces(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeReattachesSpacingDakuten(t *testing.T) {
+	if got, want := Normalize("ただ才あらは゛用いる"), Normalize("ただ才あらば用いる"); got != want {
+		t.Errorf("Normalize(spacing dakuten) = %q, want %q", got, want)
+	}
+}

@@ -637,12 +637,56 @@ func TestMatchSubtitlePresentationVariantsReachThreshold(t *testing.T) {
 		{annict: "Ez Do Dance", file: "EZ DO DANCE"},
 		{annict: "顔の無い王 ノーフェイス・メイキング", file: "顔の無い王—ノーフェイス・メイキング—"},
 		{annict: "紅い瞳の魔法使い達【ウィザーズ】", file: "紅い瞳の魔法使い達(ウィザーズ)"},
+		{annict: "プロジェクトS 史上最悪の道場／ビッチ・パーフェクト／F*CK & FURIOUS", file: "プロジェクトS ～史上最悪の道場～／ビッチ・パーフェクト／F＊CK & FURIOUS"},
+		{annict: "友達になってくれませんか／描く派", file: "友達になってくれませんか&描く派"},
+		{annict: "前代未聞です！", file: "前代未聞です"},
+		{annict: "\u200bI'll come back for you", file: "I'll come back for you"},
+		{annict: "ただ才あらば用いる", file: "ただ才あらは゛用いる"},
 	} {
 		episodes := map[int][]annict.Episode{1: {{ID: 100 + i, Number: float64Ptr(1), Title: tt.annict}}}
 		meta := &parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 1, Subtitle: tt.file}
 		result := Match(meta, works, episodes, nil)
 		if result == nil || result.Confidence < AutoRenameThreshold {
 			t.Errorf("Match(%q, %q) = %+v, want confidence >= %d", tt.annict, tt.file, result, AutoRenameThreshold)
+		}
+	}
+}
+
+func TestMatchStructuredSubtitlePartsReachThreshold(t *testing.T) {
+	works := []annict.Work{{ID: 1, Title: "作品"}}
+	for i, tt := range []struct {
+		annict string
+		file   string
+	}{
+		{annict: "ヒーロー", file: "ヒーロー／大丈夫"},
+		{annict: "マルデチャックの穴／パンティ・ショーツ 魔根の伝説／ザ・プラッシュ", file: "パンティ・ショーツ 魔根の伝説／ザ・プラッシュ"},
+		{annict: "三月の風と四月の雨で五月の花が咲く", file: "March winds and April showers bring forth May flowers.(三月の風と四月の雨で五月の花が咲く)"},
+	} {
+		episodes := map[int][]annict.Episode{1: {{ID: 200 + i, Number: float64Ptr(1), Title: tt.annict}}}
+		meta := &parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 1, Subtitle: tt.file}
+		result := Match(meta, works, episodes, nil)
+		if result == nil || result.Confidence < AutoRenameThreshold {
+			t.Errorf("Match(%q, %q) = %+v, want confidence >= %d", tt.annict, tt.file, result, AutoRenameThreshold)
+		}
+	}
+}
+
+func TestMatchStructuredSubtitleRejectsShortOrMeaningfulQualifier(t *testing.T) {
+	for _, tt := range []struct {
+		annict string
+		file   string
+	}{
+		{annict: "歩", file: "歩／バシ"},
+		{annict: "決戦（前編）", file: "決戦"},
+	} {
+		result := Match(
+			&parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 1, Subtitle: tt.file},
+			[]annict.Work{{ID: 1, Title: "作品"}},
+			map[int][]annict.Episode{1: {{ID: 301, Number: float64Ptr(1), Title: tt.annict}}},
+			nil,
+		)
+		if result == nil || result.Confidence >= AutoRenameThreshold {
+			t.Errorf("Match(%q, %q) = %+v, want confidence below %d", tt.annict, tt.file, result, AutoRenameThreshold)
 		}
 	}
 }

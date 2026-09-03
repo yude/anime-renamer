@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/yude/anime-renamer/internal/annict"
@@ -623,9 +624,110 @@ func subtitlesEquivalent(a, b string) bool {
 // work and integer episode number have already selected one Annict episode.
 // Candidate selection deliberately continues to use subtitlesEquivalent.
 func subtitlesEquivalentForScoring(a, b string) bool {
-	na := normalize.NormalizeSubtitleForMatch(a)
-	nb := normalize.NormalizeSubtitleForMatch(b)
-	return na != "" && nb != "" && (na == nb || oneRuneInsertionApart([]rune(na), []rune(nb)))
+	na := subtitleScoringKey(a)
+	nb := subtitleScoringKey(b)
+	return na != "" && nb != "" && (na == nb || subtitleStructuredPartMatch(a, b) || oneRuneInsertionApart([]rune(na), []rune(nb)))
+}
+
+func subtitleStructuredPartMatch(a, b string) bool {
+	if subtitleSegmentSequenceMatch(a, b) || subtitleSegmentSequenceMatch(b, a) {
+		return true
+	}
+	return subtitleBracketPartMatch(a, b) || subtitleBracketPartMatch(b, a)
+}
+
+// subtitleSegmentSequenceMatch reports whether every slash/ampersand-delimited
+// segment in subset occurs contiguously in full. A minimum normalized length
+// prevents generic one-character segment titles from becoming strong matches.
+func subtitleSegmentSequenceMatch(subset, full string) bool {
+	shorter := subtitleSegments(subset)
+	longer := subtitleSegments(full)
+	if len(shorter) == 0 || len(shorter) >= len(longer) {
+		return false
+	}
+	matchedLength := 0
+	for _, segment := range shorter {
+		matchedLength += utf8.RuneCountInString(segment)
+	}
+	if matchedLength < 3 {
+		return false
+	}
+	for offset := 0; offset+len(shorter) <= len(longer); offset++ {
+		matched := true
+		for i := range shorter {
+			if shorter[i] != longer[offset+i] {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
+func subtitleSegments(s string) []string {
+	raw := strings.FieldsFunc(s, func(r rune) bool {
+		return r == '/' || r == '／' || r == '&' || r == '＆'
+	})
+	segments := make([]string, 0, len(raw))
+	for _, part := range raw {
+		if key := subtitleScoringKey(part); key != "" {
+			segments = append(segments, key)
+		}
+	}
+	return segments
+}
+
+func subtitleBracketPartMatch(container, whole string) bool {
+	want := subtitleScoringKey(whole)
+	if utf8.RuneCountInString(want) < 3 {
+		return false
+	}
+	runes := []rune(container)
+	for i, open := range runes {
+		close := rune(0)
+		switch open {
+		case '(':
+			close = ')'
+		case '（':
+			close = '）'
+		default:
+			continue
+		}
+		for j := i + 1; j < len(runes); j++ {
+			if runes[j] == close {
+				if subtitleScoringKey(string(runes[i+1:j])) == want {
+					return true
+				}
+				break
+			}
+		}
+	}
+	return false
+}
+
+// subtitleScoringKey ignores a few recorder-only decorations after the work
+// and integer episode number have already selected an episode. Candidate
+// selection continues to use the stricter subtitlesEquivalent key.
+func subtitleScoringKey(s string) string {
+	s = normalize.NormalizeSubtitleForMatch(s)
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if unicode.Is(unicode.Cf, r) {
+			continue
+		}
+		switch r {
+		case '!', '?', '~', '〜', '～':
+			continue
+		case '&', '＆', '／':
+			r = '/'
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // oneRuneInsertionApart tolerates one omitted or duplicated character only in

@@ -33,11 +33,16 @@ var japaneseSeasonNumbers = strings.NewReplacer(
 // Normalize applies NFKC normalization and full-width to half-width conversion.
 func Normalize(s string) string {
 	s = norm.NFKC.String(s)
+	// NFKC expands the spacing dakuten/handakuten characters used by some
+	// EPGs to an ASCII space plus a combining mark. Reattach that mark before
+	// NFC composition so は゛ and the canonically decomposed ば compare alike.
+	s = strings.ReplaceAll(s, " \u3099", "\u3099")
+	s = strings.ReplaceAll(s, " \u309a", "\u309a")
 	var b strings.Builder
 	for _, r := range s {
 		b.WriteRune(toHalfWidth(toSmallKana(r)))
 	}
-	return b.String()
+	return norm.NFC.String(b.String())
 }
 
 // NormalizeForSearch normalizes for fuzzy matching:
