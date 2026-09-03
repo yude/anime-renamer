@@ -399,6 +399,29 @@ func TestFractionalEpisodeNumberDoesNotMatchIntegerInput(t *testing.T) {
 	}
 }
 
+func TestEpisodeNumberUsesNumberTextBeforeInternalSortOrder(t *testing.T) {
+	for _, tt := range []struct {
+		text string
+		want int
+	}{
+		{text: "第6話", want: 6},
+		{text: "＃１３", want: 13},
+		{text: "episode 2", want: 2},
+	} {
+		episode := &annict.Episode{NumberText: tt.text, SortNumber: tt.want * 10}
+		if got, ok := EpisodeNumber(episode); !ok || got != tt.want {
+			t.Errorf("EpisodeNumber(NumberText=%q, SortNumber=%d) = %d, %v; want %d, true", tt.text, episode.SortNumber, got, ok, tt.want)
+		}
+	}
+}
+
+func TestEpisodeNumberRejectsUnsupportedNumberTextWithoutSortFallback(t *testing.T) {
+	episode := &annict.Episode{NumberText: "総集篇", SortNumber: 2150}
+	if got, ok := EpisodeNumber(episode); ok || got != 0 {
+		t.Errorf("EpisodeNumber() = %d, %v; want 0, false", got, ok)
+	}
+}
+
 func TestMatchMultipleWorksNarrowedByEpisodeSortNumber(t *testing.T) {
 	works := []annict.Work{
 		{ID: 1, Title: "作品A"},

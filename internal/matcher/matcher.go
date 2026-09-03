@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -29,6 +30,8 @@ const (
 )
 
 var seriesContinuationPattern = regexp.MustCompile(`^(?:第[0-9]+(?:期|クール)|season[0-9]+|[0-9]+(?:st|nd|rd|th)(?:season|シーズン)|シーズン[0-9]+|[0-9]+期)`)
+
+var episodeNumberTextPattern = regexp.MustCompile(`(?i)^(?:第\s*([0-9]+)\s*話|#\s*([0-9]+)|episode\s*([0-9]+)|([0-9]+))$`)
 
 // Season mapping from month to Annict season name. Each season is exactly
 // a 3-month cour: winter=Jan-Mar, spring=Apr-Jun, summer=Jul-Sep,
@@ -441,6 +444,20 @@ func EpisodeNumber(e *annict.Episode) (int, bool) {
 			return 0, false
 		}
 		return integer, true
+	}
+	if strings.TrimSpace(e.NumberText) != "" {
+		matches := episodeNumberTextPattern.FindStringSubmatch(normalize.Normalize(strings.TrimSpace(e.NumberText)))
+		if matches == nil {
+			return 0, false
+		}
+		for _, digits := range matches[1:] {
+			if digits == "" {
+				continue
+			}
+			number, err := strconv.Atoi(digits)
+			return number, err == nil && number > 0
+		}
+		return 0, false
 	}
 	return e.SortNumber, e.SortNumber > 0
 }
