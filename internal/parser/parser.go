@@ -392,19 +392,7 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 				}
 			}
 		} else {
-			// Look for 「」 after the episode marker.
-			runes := []rune(afterEp)
-			for i, r := range runes {
-				if r == '「' {
-					for j := i + 1; j < len(runes); j++ {
-						if runes[j] == '」' {
-							subtitle = string(runes[i+1 : j])
-							break
-						}
-					}
-					break
-				}
-			}
+			subtitle = firstQuotedContent(afterEp)
 		}
 	} else {
 		// No episode marker found — no subtitle extraction
@@ -435,6 +423,39 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 		Subtitle:      subtitle,
 		RecordedDate:  recordedDate,
 	}, nil
+}
+
+func firstQuotedContent(s string) string {
+	runes := []rune(s)
+	start := -1
+	closers := make([]rune, 0, 2)
+	for i, r := range runes {
+		if close, ok := japaneseQuoteClose(r); ok {
+			if start < 0 {
+				start = i + 1
+			}
+			closers = append(closers, close)
+			continue
+		}
+		if start >= 0 && len(closers) > 0 && r == closers[len(closers)-1] {
+			closers = closers[:len(closers)-1]
+			if len(closers) == 0 {
+				return string(runes[start:i])
+			}
+		}
+	}
+	return ""
+}
+
+func japaneseQuoteClose(open rune) (rune, bool) {
+	switch open {
+	case '「':
+		return '」', true
+	case '『':
+		return '』', true
+	default:
+		return 0, false
+	}
 }
 
 // StripMetadataTags removes common recording metadata tags from a filename.

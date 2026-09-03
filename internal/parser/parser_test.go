@@ -733,6 +733,20 @@ func TestParseFilename(t *testing.T) {
 			wantEp:    1,
 			wantDate:  time.Date(2022, 7, 6, 0, 0, 0, 0, jst),
 		},
+		{
+			name:      "nested Japanese quotes stay in subtitle",
+			input:     "作品 #17 「「A」がきた！」.mp4",
+			wantTitle: "作品",
+			wantEp:    17,
+			wantSub:   "「A」がきた！",
+		},
+		{
+			name:      "mixed nested Japanese quotes stay balanced",
+			input:     "作品 #1「上の巻『帰ってきた救世主』」.mp4",
+			wantTitle: "作品",
+			wantEp:    1,
+			wantSub:   "上の巻『帰ってきた救世主』",
+		},
 
 		// === Error cases ===
 		{
