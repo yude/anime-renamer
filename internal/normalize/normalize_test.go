@@ -81,12 +81,20 @@ func TestNormalizeTitleForMatch(t *testing.T) {
 		{a: "作品 ～副題～", b: "作品 〜副題〜", eq: true},
 		{a: "ポプテピピック TVアニメ—ション作品第二シリーズ", b: "ポプテピピック 第二シリーズ", eq: true},
 		{a: "タイムボカンシリーズ ヤッターマン", b: "ヤッターマン", eq: true},
+		{a: "BLEACH 千年血戦篇 -訣別譚-", b: "BLEACH 千年血戦篇ｰ訣別譚ｰ", eq: true},
+		{a: "マッシュル-MASHLE-(第2期)", b: "マッシュル-MASHLE- 神覚者候補選抜試験編", eq: true},
+		{a: "ヴァニタスの手記（カルテ）", b: "ヴァニタスの手記", eq: true},
+		{a: "作品 第4シーズン", b: "作品 (第4期)", eq: true},
+		{a: "作品 SEASON 2", b: "作品 第2期", eq: true},
+		{a: "作品 3rd Season", b: "作品 第3期", eq: true},
 		{a: "けいおん！", b: "けいおん！！", eq: false},
 		{a: "作品 第2期", b: "作品 第3期", eq: false},
 	} {
-		got := NormalizeTitleForMatch(tt.a) == NormalizeTitleForMatch(tt.b)
+		normalizedA := NormalizeTitleForMatch(tt.a)
+		normalizedB := NormalizeTitleForMatch(tt.b)
+		got := normalizedA == normalizedB
 		if got != tt.eq {
-			t.Errorf("NormalizeTitleForMatch(%q) == NormalizeTitleForMatch(%q) is %v, want %v", tt.a, tt.b, got, tt.eq)
+			t.Errorf("NormalizeTitleForMatch(%q)=%q == NormalizeTitleForMatch(%q)=%q is %v, want %v", tt.a, normalizedA, tt.b, normalizedB, got, tt.eq)
 		}
 	}
 }

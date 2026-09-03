@@ -248,17 +248,22 @@ func processFile(
 		}
 	}
 	usedRelatedWorks := false
-	if result.Episode == nil {
+	// An older work can share the exact base title and episode numbers with a
+	// newer, explicitly labelled continuation or remake. If the selected
+	// episode contradicts the file subtitle, give those related works a chance
+	// to provide a stronger match instead of stopping at the first number.
+	shouldRetryRelated := result.Episode == nil || (meta.Subtitle != "" && result.Confidence < matcher.AutoRenameThreshold)
+	if shouldRetryRelated {
 		relatedWorks, relatedErr := searchRelatedWorks(client, c, meta.WorkTitle, workCache, episodesCache)
 		if relatedErr != nil {
 			if verbose {
 				fmt.Fprintf(os.Stderr, "  Warning: could not search related seasons: %v\n", relatedErr)
 			}
-		} else if relatedResult := matcher.MatchRelated(meta, relatedWorks, episodesCache, nil); relatedResult != nil && relatedResult.Episode != nil {
+		} else if relatedResult := matcher.MatchRelated(meta, relatedWorks, episodesCache, nil); relatedResult != nil && relatedResult.Episode != nil && (result.Episode == nil || relatedResult.Confidence > result.Confidence) {
 			works = relatedWorks
 			result = relatedResult
 			usedRelatedWorks = true
-			fmt.Fprintf(os.Stderr, "  Fallback:  matched an explicitly named related season\n")
+			fmt.Fprintf(os.Stderr, "  Fallback:  found a stronger match in an explicitly named related work\n")
 		}
 	}
 

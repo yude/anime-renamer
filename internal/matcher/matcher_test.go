@@ -664,10 +664,20 @@ func TestMatchingRelatedWorksIncludesOnlyExplicitSeriesContinuations(t *testing.
 		{ID: 2, Title: "【推しの子】第2期"},
 		{ID: 3, Title: "【推しの子】 Season 3"},
 		{ID: 4, Title: "【推しの子】 Mother and Children"},
+		{ID: 5, Title: "【推しの子】 part2"},
+		{ID: 6, Title: "【推しの子】 2クール目"},
+		{ID: 7, Title: "【推しの子】 (Netflixオリジナル)"},
+		{ID: 8, Title: "【推しの子】 (TV放送)"},
 	}
 	got := MatchingRelatedWorks("【推しの子】", works)
-	if len(got) != 3 || got[0].ID != 1 || got[1].ID != 2 || got[2].ID != 3 {
-		t.Errorf("MatchingWorks() = %+v, want base work and explicit seasons only", got)
+	wantIDs := []int{1, 2, 3, 5, 6, 7, 8}
+	if len(got) != len(wantIDs) {
+		t.Fatalf("MatchingRelatedWorks() = %+v, want IDs %v", got, wantIDs)
+	}
+	for i, wantID := range wantIDs {
+		if got[i].ID != wantID {
+			t.Errorf("MatchingRelatedWorks()[%d].ID = %d, want %d", i, got[i].ID, wantID)
+		}
 	}
 }
 

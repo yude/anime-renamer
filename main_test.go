@@ -541,6 +541,49 @@ func TestProcessFileRetriesExplicitRelatedSeasonAfterMissingEpisode(t *testing.T
 	}
 }
 
+func TestProcessFileRetriesRelatedWorkAfterSubtitleMismatch(t *testing.T) {
+	graphqlRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/graphql" {
+			http.NotFound(w, r)
+			return
+		}
+		graphqlRequests++
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[
+			{"node":{"annictId":1,"title":"作品","seasonName":"SPRING","seasonYear":1989,"episodesCount":1,"episodes":{"edges":[{"node":{"annictId":101,"number":1,"sortNumber":100,"title":"旧作"}}]}}},
+			{"node":{"annictId":2,"title":"作品 (Netflixオリジナル)","seasonName":"AUTUMN","seasonYear":2023,"episodesCount":1,"episodes":{"edges":[{"node":{"annictId":201,"number":1,"sortNumber":100,"title":"新作"}}]}}}
+		]}}}`)
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "作品(2023) #01「新作」.mp4")
+	if err := os.WriteFile(file, []byte("recording"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	client := annict.NewClientWithURLs("token", server.URL, server.URL+"/graphql")
+	result := processFile(
+		file,
+		client,
+		cache.NewDisabled(filepath.Join(dir, "cache")),
+		make(map[string][]annict.Work),
+		make(map[int][]annict.Episode),
+		make(map[programsCacheKey][]annict.Program),
+		make(map[string]string),
+		true,
+		false,
+		matcher.AutoRenameThreshold,
+		"",
+	)
+	if result.Error != nil || result.WorkTitle != "作品 (Netflixオリジナル)" || result.EpisodeNum != 1 || !result.Previewed {
+		t.Fatalf("processFile() = %+v, want stronger related-work match", result)
+	}
+	if graphqlRequests != 2 {
+		t.Errorf("GraphQL requests = %d, want initial search plus one related-work retry", graphqlRequests)
+	}
+}
+
 func TestProcessFileNoEpisodeDoesNotContactAnnict(t *testing.T) {
 	testProcessFileSkippedWithoutAnnict(t, "作品 総集編 (20260801).mp4", "no supported single episode number")
 }

@@ -10,7 +10,10 @@ import (
 
 var (
 	parentheticalYearPattern = regexp.MustCompile(`[（(][0-9０-９]{4}(?:年版)?[）)]`)
-	ordinalSeasonPattern     = regexp.MustCompile(`第([0-9]+)期`)
+	ordinalSeasonPattern     = regexp.MustCompile(`第\s*([0-9]+)\s*期`)
+	japaneseSeasonPattern    = regexp.MustCompile(`(?:第\s*)?([0-9]+)\s*シーズン`)
+	englishSeasonPattern     = regexp.MustCompile(`(?i)season\s*([0-9]+)`)
+	ordinalEnglishSeason     = regexp.MustCompile(`(?i)([0-9]+)(?:st|nd|rd|th)\s*season`)
 	trailingFirstSeason      = regexp.MustCompile(`1期$`)
 )
 
@@ -74,6 +77,9 @@ func NormalizeTitleForMatch(s string) string {
 	s = parentheticalYearPattern.ReplaceAllString(s, "")
 	s = strings.ToLower(NormalizeKatakanaDashes(Normalize(s)))
 	s = japaneseSeasonNumbers.Replace(s)
+	s = japaneseSeasonPattern.ReplaceAllString(s, "${1}期")
+	s = ordinalEnglishSeason.ReplaceAllString(s, "${1}期")
+	s = englishSeasonPattern.ReplaceAllString(s, "${1}期")
 	s = ordinalSeasonPattern.ReplaceAllString(s, "${1}期")
 	s = trailingFirstSeason.ReplaceAllString(s, "")
 	key := strings.Map(func(r rune) rune {
@@ -90,6 +96,15 @@ func NormalizeTitleForMatch(s string) string {
 	}
 	if key == "タイムボカンシリーズヤッターマン" {
 		return "ヤッターマン"
+	}
+	if key == "bleach千年血戦篇ー訣別譚ー" {
+		return "bleach千年血戦篇訣別譚"
+	}
+	if key == "マッシュルmashle2期" {
+		return "マッシュルmashle神覚者候補選抜試験編"
+	}
+	if key == "ヴアニタスの手記カルテ" {
+		return "ヴアニタスの手記"
 	}
 	return key
 }

@@ -29,7 +29,7 @@ const (
 	AutoRenameThreshold = 90
 )
 
-var seriesContinuationPattern = regexp.MustCompile(`^(?:第[0-9]+(?:期|クール)|season[0-9]+|[0-9]+(?:st|nd|rd|th)(?:season|シーズン)|シーズン[0-9]+|[0-9]+期)`)
+var seriesContinuationPattern = regexp.MustCompile(`^(?:第?[0-9]+(?:期|クール(?:目)?)|season[0-9]+|[0-9]+(?:st|nd|rd|th)(?:season|シーズン)|シーズン[0-9]+|part[0-9]+|netflixオリジナル|tv放送)`)
 
 var episodeNumberTextPattern = regexp.MustCompile(`(?i)^(?:第\s*([0-9]+)\s*話|#\s*([0-9]+)|episode\s*([0-9]+)|([0-9]+))$`)
 

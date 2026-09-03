@@ -343,6 +343,7 @@ var titleSearchAliases = map[string][]string{
 	normalize.NormalizeTitleForMatch("うたの☆プリンスさまっ♪ マジLOVE1000%"):     {"うたの☆プリンスさまっ♪"},
 	normalize.NormalizeTitleForMatch("ＯｖｅｒＤｒｉｖｅ"):                    {"Over Drive"},
 	normalize.NormalizeTitleForMatch("タイムボカンシリーズ ヤッターマン"):            {"ヤッターマン"},
+	normalize.NormalizeTitleForMatch("オーイ！とんぼ"):                      {"オーイ! とんぼ"},
 }
 
 func punctuationAsSpaces(s string) string {
