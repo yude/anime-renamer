@@ -51,6 +51,17 @@ func TestParseFilenameUnsupportedEpisodeError(t *testing.T) {
 	}
 }
 
+func TestParseFilenameNoMeaningfulContentError(t *testing.T) {
+	for _, input := range []string{
+		"(2022_07_05).mp4",
+		"[字] (20220705).m2ts",
+	} {
+		if _, err := ParseFilename(input); !errors.Is(err, ErrNoMeaningfulContent) {
+			t.Errorf("ParseFilename(%q) error = %v, want ErrNoMeaningfulContent", input, err)
+		}
+	}
+}
+
 func TestParseFilename(t *testing.T) {
 	jst := time.FixedZone("JST", 9*60*60)
 

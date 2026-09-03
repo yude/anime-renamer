@@ -545,6 +545,10 @@ func TestProcessFileNoEpisodeDoesNotContactAnnict(t *testing.T) {
 	testProcessFileSkippedWithoutAnnict(t, "作品 総集編 (20260801).mp4", "no supported single episode number")
 }
 
+func TestProcessFileNoMeaningfulContentDoesNotContactAnnict(t *testing.T) {
+	testProcessFileSkippedWithoutAnnict(t, "(2022_07_05).mp4", "no meaningful work title or episode")
+}
+
 func TestProcessFileAmbiguousEpisodeDoesNotContactAnnict(t *testing.T) {
 	testProcessFileSkippedWithoutAnnict(t, "作品 #01,02「第一話 ／ 第二話」.mp4", "cannot represent as one positive integer episode")
 }

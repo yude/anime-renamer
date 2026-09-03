@@ -160,6 +160,12 @@ func processFile(
 	// Step 1: Parse filename
 	meta, err := parser.ParseFilename(baseName)
 	if err != nil {
+		if errors.Is(err, parser.ErrNoMeaningfulContent) {
+			return &renamer.RenameResult{
+				OriginalPath: file,
+				SkipReason:   fmt.Sprintf("no meaningful work title or episode in %q", baseName),
+			}
+		}
 		if errors.Is(err, parser.ErrAmbiguousEpisode) || errors.Is(err, parser.ErrUnsupportedEpisode) {
 			return &renamer.RenameResult{
 				OriginalPath: file,

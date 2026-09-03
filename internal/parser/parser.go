@@ -30,6 +30,10 @@ var (
 	// ErrUnsupportedEpisode is returned when a filename explicitly contains an
 	// episode number that the Annict matching/output model cannot represent.
 	ErrUnsupportedEpisode = errors.New("unsupported episode number")
+
+	// ErrNoMeaningfulContent is returned when removing the extension, recording
+	// date, and metadata tags leaves no work title or episode information.
+	ErrNoMeaningfulContent = errors.New("no meaningful content")
 )
 
 var (
@@ -291,7 +295,7 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 	remaining = strings.ReplaceAll(remaining, " ", "")
 	remaining = strings.ReplaceAll(remaining, "\u3000", "")
 	if strings.TrimSpace(remaining) == "" {
-		return nil, fmt.Errorf("no meaningful content in filename: %q", filename)
+		return nil, fmt.Errorf("%w in filename: %q", ErrNoMeaningfulContent, filename)
 	}
 	if notation := ambiguousEpisodeNotation(name); notation != "" {
 		return nil, fmt.Errorf("%w %q in %q", ErrAmbiguousEpisode, notation, filename)
