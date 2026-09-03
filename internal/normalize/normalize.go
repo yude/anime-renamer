@@ -88,6 +88,9 @@ func NormalizeTitleForMatch(s string) string {
 	if key == "ポプテピピックtvアニメーション作品第二シリーズ" {
 		return "ポプテピピック第二シリーズ"
 	}
+	if key == "タイムボカンシリーズヤッターマン" {
+		return "ヤッターマン"
+	}
 	return key
 }
 

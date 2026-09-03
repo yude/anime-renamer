@@ -295,6 +295,7 @@ func searchTitleVariants(title string) []string {
 	add(normalizePunctForSearch(title))
 	add(mixedExclamationWidth(title))
 	add(spaceBeforeParenthetical(mixedExclamationWidth(title)))
+	add(parentheticalBase(title))
 	add(normalizedTitle)
 	add(normalizePunctForSearch(normalizedTitle))
 	add(normalize.NormalizeForSearch(title))
@@ -336,8 +337,12 @@ func searchTitleVariants(title string) []string {
 }
 
 var titleSearchAliases = map[string][]string{
-	"steinsgate0": {"STEINS;GATE 0"},
-	"ポプテピピック第二シリーズ": {"ポプテピピック 第二シリーズ"},
+	normalize.NormalizeTitleForMatch("シュタインズ・ゲート ゼロ"):                {"STEINS;GATE 0"},
+	normalize.NormalizeTitleForMatch("ポプテピピック TVアニメーション作品第二シリーズ"):    {"ポプテピピック 第二シリーズ"},
+	normalize.NormalizeTitleForMatch("「1分間だけ触れてもいいよ…」シェアハウスの秘密ルール。"): {"1分間だけ触れてもいいよ"},
+	normalize.NormalizeTitleForMatch("うたの☆プリンスさまっ♪ マジLOVE1000%"):     {"うたの☆プリンスさまっ♪"},
+	normalize.NormalizeTitleForMatch("ＯｖｅｒＤｒｉｖｅ"):                    {"Over Drive"},
+	normalize.NormalizeTitleForMatch("タイムボカンシリーズ ヤッターマン"):            {"ヤッターマン"},
 }
 
 func punctuationAsSpaces(s string) string {
@@ -411,6 +416,14 @@ func spaceBeforeParenthetical(s string) string {
 	return b.String()
 }
 
+func parentheticalBase(s string) string {
+	index := strings.IndexAny(s, "(（")
+	if index <= 0 {
+		return s
+	}
+	return strings.TrimSpace(s[:index])
+}
+
 var (
 	seasonNumberSpacePattern = regexp.MustCompile(`(?i)(season)\s+([0-9]+)$`)
 	ordinalSeasonGapPattern  = regexp.MustCompile(`(?i)\s+([0-9]+(?:st|nd|rd|th)\s+season)$`)
@@ -418,8 +431,8 @@ var (
 	trailingRomanNumeral     = regexp.MustCompile(`([0-9])([IVX]+)$`)
 	japaneseSeasonSuffix     = regexp.MustCompile(`(\S)(第[0-9]+(?:期|クール))$`)
 	japaneseSeriesSuffix     = regexp.MustCompile(`\s*[（(]?\s*第?[0-9一二三四五六七八九十]+期.*$`)
-	englishSeriesSuffix      = regexp.MustCompile(`(?i)\s+(?:season\s*[0-9]+|[0-9]+(?:st|nd|rd|th)\s+season).*$`)
-	romanSeriesSuffix        = regexp.MustCompile(`(?i)([^a-z])(?:[ivxＸ]+|[ⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+)(?:\s+.*)?$`)
+	englishSeriesSuffix      = regexp.MustCompile(`(?i)\s*(?:season\s*[0-9]+|[0-9]+(?:st|nd|rd|th)\s+season).*$`)
+	romanSeriesSuffix        = regexp.MustCompile(`(?i)([^a-z])(?:[ivxＸ]+|[ⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+)(?:[\s~～〜\-－―].*)?$`)
 )
 
 func compactSeasonSpacing(s string) string {
@@ -457,7 +470,7 @@ func decorativeSubtitleBase(s string) string {
 	if index <= 0 {
 		return s
 	}
-	return strings.TrimSpace(s[:index])
+	return strings.TrimRight(strings.TrimSpace(s[:index]), "!！?？")
 }
 
 func spaceBeforeInnerHyphens(s string) string {

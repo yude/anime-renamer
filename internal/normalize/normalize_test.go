@@ -80,6 +80,7 @@ func TestNormalizeTitleForMatch(t *testing.T) {
 		{a: "シュタインズ・ゲート ゼロ", b: "STEINS;GATE 0", eq: true},
 		{a: "作品 ～副題～", b: "作品 〜副題〜", eq: true},
 		{a: "ポプテピピック TVアニメ—ション作品第二シリーズ", b: "ポプテピピック 第二シリーズ", eq: true},
+		{a: "タイムボカンシリーズ ヤッターマン", b: "ヤッターマン", eq: true},
 		{a: "けいおん！", b: "けいおん！！", eq: false},
 		{a: "作品 第2期", b: "作品 第3期", eq: false},
 	} {
