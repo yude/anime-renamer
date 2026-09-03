@@ -707,6 +707,45 @@ func TestMatchDoesNotMapMissingNumberByDuplicateSubtitle(t *testing.T) {
 	}
 }
 
+func TestMatchMapsLocalSeasonNumberToContiguousAnnictNumber(t *testing.T) {
+	episodes := map[int][]annict.Episode{1: {
+		{ID: 101, Number: float64Ptr(13), Title: "KNIGHTMARE"},
+		{ID: 102, Number: float64Ptr(14), Title: "TRUTH OF THE HERO"},
+		{ID: 103, Number: float64Ptr(15), Title: "ANSWER THE DOOR"},
+	}}
+	meta := &parser.RecordingMetadata{WorkTitle: "HIGH CARD season2", EpisodeNumber: 2}
+	result := Match(meta, []annict.Work{{ID: 1, Title: "HIGH CARD season2"}}, episodes, nil)
+	if result == nil || result.Episode == nil || result.Episode.ID != 102 || result.Confidence < AutoRenameThreshold {
+		t.Errorf("Match() = %+v, want local episode 2 mapped to Annict episode 14", result)
+	}
+}
+
+func TestMatchRejectsLocalSeasonNumberForGappedAnnictNumbers(t *testing.T) {
+	episodes := map[int][]annict.Episode{1: {
+		{ID: 101, Number: float64Ptr(13)},
+		{ID: 102, Number: float64Ptr(15)},
+	}}
+	meta := &parser.RecordingMetadata{WorkTitle: "作品 第2期", EpisodeNumber: 2}
+	result := Match(meta, []annict.Work{{ID: 1, Title: "作品 第2期"}}, episodes, nil)
+	if result == nil || result.Episode != nil {
+		t.Errorf("Match() = %+v, want no episode for a gapped Annict sequence", result)
+	}
+}
+
+func TestMatchLocalSeasonNumberSkipsDescriptiveSpecial(t *testing.T) {
+	episodes := map[int][]annict.Episode{1: {
+		{ID: 101, Number: float64Ptr(73), NumberText: "第七十三話"},
+		{ID: 102, Number: float64Ptr(74), NumberText: "第七十四話"},
+		{ID: 199, Number: float64Ptr(74), NumberText: "総集編"},
+		{ID: 103, Number: float64Ptr(75), NumberText: "第七十五話"},
+	}}
+	meta := &parser.RecordingMetadata{WorkTitle: "作品 第4期", EpisodeNumber: 3}
+	result := Match(meta, []annict.Work{{ID: 1, Title: "作品 第4期"}}, episodes, nil)
+	if result == nil || result.Episode == nil || result.Episode.ID != 103 || result.Confidence < AutoRenameThreshold {
+		t.Errorf("Match() = %+v, want local episode 3 mapped past the descriptive special to Annict episode 75", result)
+	}
+}
+
 func TestFindMatchingProgram(t *testing.T) {
 	jst := time.FixedZone("JST", 9*60*60)
 	date := time.Date(2026, 8, 13, 0, 0, 0, 0, jst)

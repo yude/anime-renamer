@@ -32,6 +32,7 @@ const (
 var seriesContinuationPattern = regexp.MustCompile(`^(?:第?[0-9]+(?:期|クール(?:目)?)|season[0-9]+|[0-9]+(?:st|nd|rd|th)(?:season|シーズン)|シーズン[0-9]+|part[0-9]+|netflixオリジナル|tv放送)`)
 
 var episodeNumberTextPattern = regexp.MustCompile(`(?i)^(?:第\s*([0-9]+)\s*話|#\s*([0-9]+)|episode\s*([0-9]+)|([0-9]+))$`)
+var kanjiEpisodeNumberTextPattern = regexp.MustCompile(`^第\s*[〇一二三四五六七八九十百千壱弐参肆伍陸漆捌玖拾]+\s*話$`)
 
 // Season mapping from month to Annict season name. Each season is exactly
 // a 3-month cour: winter=Jan-Mar, spring=Apr-Jun, summer=Jul-Sep,
@@ -189,8 +190,10 @@ func match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 			matchedNumber, _ := EpisodeNumber(episode)
 			if matchedNumber == episodeNumberForMatch {
 				result.Reasons = append(result.Reasons, fmt.Sprintf("episode number %d matched", episodeNumberForMatch))
-			} else {
+			} else if meta.Subtitle != "" && episode.Title != "" && subtitlesEquivalent(episode.Title, meta.Subtitle) {
 				result.Reasons = append(result.Reasons, fmt.Sprintf("unique subtitle mapped file episode %d to Annict episode %d", episodeNumberForMatch, matchedNumber))
+			} else {
+				result.Reasons = append(result.Reasons, fmt.Sprintf("local episode %d mapped to Annict episode %d", episodeNumberForMatch, matchedNumber))
 			}
 
 			if meta.Subtitle == "" {
@@ -509,6 +512,39 @@ func findMatchingEpisode(number int, subtitle string, episodes []annict.Episode)
 	}
 	if subtitleMatch != nil && !subtitleAmbiguous {
 		return subtitleMatch
+	}
+	// Some explicitly titled later seasons restart their EPG numbering at 1
+	// while Annict retains continuous series numbers. Only map by ordinal when
+	// every supported Annict episode number is a contiguous sequence starting
+	// above 1; gaps or duplicates make the mapping unsafe.
+	var localMatch *annict.Episode
+	firstNumber := 0
+	ordinal := 0
+	for i := range episodes {
+		effectiveNumber, ok := EpisodeNumber(&episodes[i])
+		if !ok {
+			continue
+		}
+		numberText := normalize.Normalize(strings.TrimSpace(episodes[i].NumberText))
+		if numberText != "" && episodeNumberTextPattern.FindStringSubmatch(numberText) == nil && !kanjiEpisodeNumberTextPattern.MatchString(numberText) {
+			// GraphQL can coerce a fractional special such as 88.5 to 88.
+			// A descriptive label (for example 総集編) identifies it as a
+			// non-episode entry that must not break the contiguous TV sequence.
+			continue
+		}
+		if firstNumber == 0 {
+			firstNumber = effectiveNumber
+		}
+		if effectiveNumber != firstNumber+ordinal {
+			return nil
+		}
+		ordinal++
+		if ordinal == number {
+			localMatch = &episodes[i]
+		}
+	}
+	if firstNumber > 1 && localMatch != nil {
+		return localMatch
 	}
 	return nil
 }
