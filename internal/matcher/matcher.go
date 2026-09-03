@@ -13,6 +13,7 @@ import (
 	"github.com/yude/anime-renamer/internal/annict"
 	"github.com/yude/anime-renamer/internal/normalize"
 	"github.com/yude/anime-renamer/internal/parser"
+	"golang.org/x/text/unicode/norm"
 )
 
 // MatchResult holds the result of matching a recording to Annict data.
@@ -34,6 +35,7 @@ var seriesContinuationPattern = regexp.MustCompile(`^(?:第?[0-9]+(?:期|クー�
 
 var episodeNumberTextPattern = regexp.MustCompile(`(?i)^(?:第\s*([0-9]+)\s*話|#\s*([0-9]+)|episode\s*([0-9]+)|([0-9]+))$`)
 var kanjiEpisodeNumberTextPattern = regexp.MustCompile(`^第\s*[〇一二三四五六七八九十百千壱弐参肆伍陸漆捌玖拾]+\s*話$`)
+var subtitleSegmentOrdinalPrefix = regexp.MustCompile(`(?i)^(?:episode[0-9]+|其の[0-9一二三四五六七八九十]+)`)
 
 // Season mapping from month to Annict season name. Each season is exactly
 // a 3-month cour: winter=Jan-Mar, spring=Apr-Jun, summer=Jul-Sep,
@@ -626,7 +628,19 @@ func subtitlesEquivalent(a, b string) bool {
 func subtitlesEquivalentForScoring(a, b string) bool {
 	na := subtitleScoringKey(a)
 	nb := subtitleScoringKey(b)
-	return na != "" && nb != "" && (na == nb || subtitleStructuredPartMatch(a, b) || oneRuneInsertionApart([]rune(na), []rune(nb)))
+	return na != "" && nb != "" && (na == nb || subtitleStructuredPartMatch(a, b) || subtitleTrailingLabelMatch(a, b) || subtitleTrailingLabelMatch(b, a) || oneRuneInsertionApart([]rune(na), []rune(nb)))
+}
+
+func subtitleTrailingLabelMatch(container, whole string) bool {
+	want := subtitleScoringKey(whole)
+	if utf8.RuneCountInString(want) < 5 {
+		return false
+	}
+	fields := strings.Fields(normalize.NormalizeForSearch(container))
+	if len(fields) < 2 || subtitleScoringKey(fields[len(fields)-1]) != want {
+		return false
+	}
+	return utf8.RuneCountInString(subtitleScoringKey(container)) >= 3*utf8.RuneCountInString(want)
 }
 
 func subtitleStructuredPartMatch(a, b string) bool {
@@ -642,7 +656,7 @@ func subtitleStructuredPartMatch(a, b string) bool {
 func subtitleSegmentSequenceMatch(subset, full string) bool {
 	shorter := subtitleSegments(subset)
 	longer := subtitleSegments(full)
-	if len(shorter) == 0 || len(shorter) >= len(longer) {
+	if len(shorter) == 0 || len(shorter) > len(longer) {
 		return false
 	}
 	matchedLength := 0
@@ -669,11 +683,11 @@ func subtitleSegmentSequenceMatch(subset, full string) bool {
 
 func subtitleSegments(s string) []string {
 	raw := strings.FieldsFunc(s, func(r rune) bool {
-		return r == '/' || r == '／' || r == '&' || r == '＆'
+		return r == '/' || r == '／' || r == '&' || r == '＆' || r == '、'
 	})
 	segments := make([]string, 0, len(raw))
 	for _, part := range raw {
-		if key := subtitleScoringKey(part); key != "" {
+		if key := subtitleSegmentOrdinalPrefix.ReplaceAllString(subtitleScoringKey(part), ""); key != "" {
 			segments = append(segments, key)
 		}
 	}
@@ -693,6 +707,10 @@ func subtitleBracketPartMatch(container, whole string) bool {
 			close = ')'
 		case '（':
 			close = '）'
+		case '「':
+			close = '」'
+		case '『':
+			close = '』'
 		default:
 			continue
 		}
@@ -712,7 +730,7 @@ func subtitleBracketPartMatch(container, whole string) bool {
 // and integer episode number have already selected an episode. Candidate
 // selection continues to use the stricter subtitlesEquivalent key.
 func subtitleScoringKey(s string) string {
-	s = normalize.NormalizeSubtitleForMatch(s)
+	s = stripLatinDiacritics(normalize.NormalizeSubtitleForMatch(s))
 	var b strings.Builder
 	b.Grow(len(s))
 	for _, r := range s {
@@ -720,7 +738,7 @@ func subtitleScoringKey(s string) string {
 			continue
 		}
 		switch r {
-		case '!', '?', '~', '〜', '～':
+		case '!', '?', '.', '~', '〜', '～', '…':
 			continue
 		case '&', '＆', '／':
 			r = '/'
@@ -728,6 +746,24 @@ func subtitleScoringKey(s string) string {
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+func stripLatinDiacritics(s string) string {
+	decomposed := norm.NFD.String(s)
+	var b strings.Builder
+	b.Grow(len(decomposed))
+	latinBase := false
+	for _, r := range decomposed {
+		if unicode.Is(unicode.Mn, r) {
+			if latinBase {
+				continue
+			}
+		} else {
+			latinBase = unicode.In(r, unicode.Latin)
+		}
+		b.WriteRune(r)
+	}
+	return norm.NFC.String(b.String())
 }
 
 // oneRuneInsertionApart tolerates one omitted or duplicated character only in

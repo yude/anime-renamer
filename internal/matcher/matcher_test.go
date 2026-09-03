@@ -642,6 +642,7 @@ func TestMatchSubtitlePresentationVariantsReachThreshold(t *testing.T) {
 		{annict: "前代未聞です！", file: "前代未聞です"},
 		{annict: "\u200bI'll come back for you", file: "I'll come back for you"},
 		{annict: "ただ才あらば用いる", file: "ただ才あらは゛用いる"},
+		{annict: "Après la pluie―彼の願い―", file: "Apres la pluie―彼の願い―"},
 	} {
 		episodes := map[int][]annict.Episode{1: {{ID: 100 + i, Number: float64Ptr(1), Title: tt.annict}}}
 		meta := &parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 1, Subtitle: tt.file}
@@ -661,12 +662,16 @@ func TestMatchStructuredSubtitlePartsReachThreshold(t *testing.T) {
 		{annict: "ヒーロー", file: "ヒーロー／大丈夫"},
 		{annict: "マルデチャックの穴／パンティ・ショーツ 魔根の伝説／ザ・プラッシュ", file: "パンティ・ショーツ 魔根の伝説／ザ・プラッシュ"},
 		{annict: "三月の風と四月の雨で五月の花が咲く", file: "March winds and April showers bring forth May flowers.(三月の風と四月の雨で五月の花が咲く)"},
+		{annict: "帰ってきた救世主", file: "上の巻「帰ってきた救世主」"},
+		{annict: "Hello Strange(そして伝説へ……)／What A Wonderful World(この素晴らしい異世界生活にようこそ)／As(あの場所で集まろう)／Mean Old World(昔の話よ…)", file: "Hello Strange(そして伝説へ……)、What A Wonderful World(この素晴らしい異世界生活にようこそ)、As(あの場所で集まろう)、Mean Old World(昔の話よ…)"},
+		{annict: "其の一 彼女には向かない職業／其の二 有頂天探偵社", file: "彼女には向かない職業"},
+		{annict: "「とのさまんの特別/とのさまんの最後」/「フロ騒動/クマ！」/「晴れの日の面々/コンビニ弁当からの……」", file: "Episode04 とのさまんの特別／とのさまんの最後 ／ Episode05 フロ騒動／クマ！ ／ Episode06 晴れの日の面々／コンビニ弁当からの…"},
 	} {
 		episodes := map[int][]annict.Episode{1: {{ID: 200 + i, Number: float64Ptr(1), Title: tt.annict}}}
 		meta := &parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 1, Subtitle: tt.file}
 		result := Match(meta, works, episodes, nil)
 		if result == nil || result.Confidence < AutoRenameThreshold {
-			t.Errorf("Match(%q, %q) = %+v, want confidence >= %d", tt.annict, tt.file, result, AutoRenameThreshold)
+			t.Errorf("Match(%q, %q) = %+v, want confidence >= %d (segments: %q vs %q)", tt.annict, tt.file, result, AutoRenameThreshold, subtitleSegments(tt.annict), subtitleSegments(tt.file))
 		}
 	}
 }
@@ -688,6 +693,19 @@ func TestMatchStructuredSubtitleRejectsShortOrMeaningfulQualifier(t *testing.T) 
 		if result == nil || result.Confidence >= AutoRenameThreshold {
 			t.Errorf("Match(%q, %q) = %+v, want confidence below %d", tt.annict, tt.file, result, AutoRenameThreshold)
 		}
+	}
+}
+
+func TestMatchLongSubtitleTrailingLabelReachThreshold(t *testing.T) {
+	annictTitle := "これは十分に長い公式説明文であり末尾の短いラベルまでを含む そんな第一話"
+	result := Match(
+		&parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 1, Subtitle: "そんな第一話"},
+		[]annict.Work{{ID: 1, Title: "作品"}},
+		map[int][]annict.Episode{1: {{ID: 401, Number: float64Ptr(1), Title: annictTitle}}},
+		nil,
+	)
+	if result == nil || result.Confidence < AutoRenameThreshold {
+		t.Errorf("Match() = %+v, want confidence >= %d for exact trailing label", result, AutoRenameThreshold)
 	}
 }
 
