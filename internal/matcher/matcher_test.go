@@ -643,6 +643,8 @@ func TestMatchSubtitlePresentationVariantsReachThreshold(t *testing.T) {
 		{annict: "\u200bI'll come back for you", file: "I'll come back for you"},
 		{annict: "ただ才あらば用いる", file: "ただ才あらは゛用いる"},
 		{annict: "Après la pluie―彼の願い―", file: "Apres la pluie―彼の願い―"},
+		{annict: "ちょー5％ーマジか!?だった", file: "ちょ—5%—マジか!？だった"},
+		{annict: "寳月詠子", file: "寶月詠子"},
 	} {
 		episodes := map[int][]annict.Episode{1: {{ID: 100 + i, Number: float64Ptr(1), Title: tt.annict}}}
 		meta := &parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 1, Subtitle: tt.file}
@@ -697,15 +699,22 @@ func TestMatchStructuredSubtitleRejectsShortOrMeaningfulQualifier(t *testing.T) 
 }
 
 func TestMatchLongSubtitleTrailingLabelReachThreshold(t *testing.T) {
-	annictTitle := "これは十分に長い公式説明文であり末尾の短いラベルまでを含む そんな第一話"
-	result := Match(
-		&parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 1, Subtitle: "そんな第一話"},
-		[]annict.Work{{ID: 1, Title: "作品"}},
-		map[int][]annict.Episode{1: {{ID: 401, Number: float64Ptr(1), Title: annictTitle}}},
-		nil,
-	)
-	if result == nil || result.Confidence < AutoRenameThreshold {
-		t.Errorf("Match() = %+v, want confidence >= %d for exact trailing label", result, AutoRenameThreshold)
+	for i, tt := range []struct {
+		annict string
+		file   string
+	}{
+		{annict: "これは十分に長い公式説明文であり末尾の短いラベルまでを含む そんな第一話", file: "そんな第一話"},
+		{annict: "いよいよ最終回を迎えるまでの十分に長い公式説明文 そんな第十二話(最終回)", file: "そんな第十二話（最終回）"},
+	} {
+		result := Match(
+			&parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 1, Subtitle: tt.file},
+			[]annict.Work{{ID: 1, Title: "作品"}},
+			map[int][]annict.Episode{1: {{ID: 401 + i, Number: float64Ptr(1), Title: tt.annict}}},
+			nil,
+		)
+		if result == nil || result.Confidence < AutoRenameThreshold {
+			t.Errorf("Match(%q, %q) = %+v, want confidence >= %d for exact trailing label", tt.annict, tt.file, result, AutoRenameThreshold)
+		}
 	}
 }
 

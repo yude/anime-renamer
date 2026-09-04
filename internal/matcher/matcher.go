@@ -637,10 +637,22 @@ func subtitleTrailingLabelMatch(container, whole string) bool {
 		return false
 	}
 	fields := strings.Fields(normalize.NormalizeForSearch(container))
-	if len(fields) < 2 || subtitleScoringKey(fields[len(fields)-1]) != want {
+	if len(fields) < 2 {
 		return false
 	}
-	return utf8.RuneCountInString(subtitleScoringKey(container)) >= 3*utf8.RuneCountInString(want)
+	if utf8.RuneCountInString(subtitleScoringKey(container)) < 3*utf8.RuneCountInString(want) {
+		return false
+	}
+	// Parentheses become field boundaries during search normalization, so a
+	// recorder label such as "そんな第十二話（最終回）" spans the final two
+	// fields of Annict's longer official description. Compare every trailing
+	// field sequence rather than only the last field.
+	for start := len(fields) - 1; start > 0; start-- {
+		if subtitleScoringKey(strings.Join(fields[start:], "")) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func subtitleStructuredPartMatch(a, b string) bool {
@@ -730,6 +742,7 @@ func subtitleBracketPartMatch(container, whole string) bool {
 // and integer episode number have already selected an episode. Candidate
 // selection continues to use the stricter subtitlesEquivalent key.
 func subtitleScoringKey(s string) string {
+	s = normalizeNumericJoinerDashes(s)
 	s = stripLatinDiacritics(normalize.NormalizeSubtitleForMatch(s))
 	var b strings.Builder
 	b.Grow(len(s))
@@ -742,10 +755,35 @@ func subtitleScoringKey(s string) string {
 			continue
 		case '&', '＆', '／':
 			r = '/'
+		case '寶', '寳':
+			// These historical forms of the same name character are both in
+			// active metadata sources but are not folded by Unicode NFKC.
+			r = '宝'
 		}
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+// normalizeNumericJoinerDashes repairs the narrow EPG convention where a
+// horizontal dash is substituted for a prolonged sound mark beside a number
+// or percent sign. Other dashes remain presentation punctuation and are not
+// made equivalent to meaningful prolonged sounds.
+func normalizeNumericJoinerDashes(s string) string {
+	runes := []rune(s)
+	for i, r := range runes {
+		switch r {
+		case '-', '‐', '‑', '‒', '–', '—', '―':
+		default:
+			continue
+		}
+		previousIsNumeric := i > 0 && (unicode.IsDigit(runes[i-1]) || runes[i-1] == '%' || runes[i-1] == '％')
+		nextIsNumeric := i+1 < len(runes) && (unicode.IsDigit(runes[i+1]) || runes[i+1] == '%' || runes[i+1] == '％')
+		if previousIsNumeric || nextIsNumeric {
+			runes[i] = 'ー'
+		}
+	}
+	return string(runes)
 }
 
 func stripLatinDiacritics(s string) string {
