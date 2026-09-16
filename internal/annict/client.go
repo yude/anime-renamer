@@ -131,6 +131,7 @@ type graphqlWorkNode struct {
 	AnnictID      int    `json:"annictId"`
 	Title         string `json:"title"`
 	TitleKana     string `json:"titleKana"`
+	SyobocalTID   *int   `json:"syobocalTid"`
 	SeasonName    string `json:"seasonName"`
 	SeasonYear    int    `json:"seasonYear"`
 	EpisodesCount int    `json:"episodesCount"`
@@ -179,6 +180,7 @@ func (c *Client) searchWorksGraphQL(title string) ([]Work, map[int][]Episode, er
         annictId
         title
         titleKana
+        syobocalTid
         seasonName
         seasonYear
         episodesCount
@@ -251,6 +253,9 @@ func (c *Client) searchWorksGraphQL(title string) ([]Work, map[int][]Episode, er
 			SeasonName:    graphqlSeason(node.SeasonYear, node.SeasonName),
 			EpisodesCount: node.EpisodesCount,
 			WatchersCount: node.WatchersCount,
+		}
+		if node.SyobocalTID != nil {
+			w.SyobocalTID = strconv.Itoa(*node.SyobocalTID)
 		}
 		works = append(works, w)
 

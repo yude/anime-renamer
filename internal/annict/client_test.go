@@ -123,7 +123,7 @@ func TestSearchWorks_GraphQLSuccessSkipsREST(t *testing.T) {
 	graphql := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[
-			{"node":{"annictId":1,"title":"作品","titleKana":"サクヒン","seasonName":"2026-summer","seasonYear":2026,"episodesCount":12,"watchersCount":100,"episodes":{"edges":[]}}}
+			{"node":{"annictId":1,"title":"作品","titleKana":"サクヒン","syobocalTid":7654,"seasonName":"2026-summer","seasonYear":2026,"episodesCount":12,"watchersCount":100,"episodes":{"edges":[]}}}
 		]}}}`)
 	}))
 	defer graphql.Close()
@@ -138,6 +138,9 @@ func TestSearchWorks_GraphQLSuccessSkipsREST(t *testing.T) {
 	}
 	if len(works) != 1 || works[0].Title != "作品" || works[0].ID != 1 {
 		t.Errorf("SearchWorks() = %+v, want single work with ID=1 Title=作品", works)
+	}
+	if works[0].SyobocalTID != "7654" {
+		t.Errorf("works[0].SyobocalTID = %q, want 7654", works[0].SyobocalTID)
 	}
 }
 
