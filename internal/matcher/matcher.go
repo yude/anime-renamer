@@ -254,10 +254,21 @@ func match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 		if meta.Subtitle != "" {
 			episode, matches := findUniqueEpisodeBySubtitle(meta.Subtitle, episodes)
 			if episode != nil {
-				result.Episode = episode
-				result.Confidence += 50
-				matchedNumber, _ := EpisodeNumber(episode)
-				result.Reasons = append(result.Reasons, fmt.Sprintf("unique subtitle matched Annict episode %d", matchedNumber))
+				resolvedEpisode := episode
+				matchedNumber, numberOK := EpisodeNumber(resolvedEpisode)
+				if !numberOK && meta.FinalEpisode {
+					if final := findFinalEpisode(work, episodes); final != nil && final.ID == episode.ID {
+						resolvedEpisode = final
+						matchedNumber, numberOK = EpisodeNumber(final)
+					}
+				}
+				if numberOK {
+					result.Episode = resolvedEpisode
+					result.Confidence += 50
+					result.Reasons = append(result.Reasons, fmt.Sprintf("unique subtitle matched Annict episode %d", matchedNumber))
+				} else {
+					result.Reasons = append(result.Reasons, "unique subtitle matched an episode without a safe positive integer number")
+				}
 			} else if matches > 1 {
 				result.Reasons = append(result.Reasons, fmt.Sprintf("subtitle matched %d Annict episodes and is ambiguous", matches))
 			} else {
@@ -265,7 +276,7 @@ func match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 			}
 		}
 
-		if result.Episode == nil && meta.FinalEpisode {
+		if result.Episode == nil && meta.FinalEpisode && (meta.Subtitle == "" || genericFinalSubtitle(meta.Subtitle)) {
 			if episode := findFinalEpisode(work, episodes); episode != nil {
 				result.Episode = episode
 				result.Confidence += 50
@@ -305,7 +316,7 @@ func findUniqueEpisodeBySubtitle(subtitle string, episodes []annict.Episode) (*a
 	var match *annict.Episode
 	matches := 0
 	for i := range episodes {
-		if _, ok := EpisodeNumber(&episodes[i]); !ok || episodes[i].Title == "" || !subtitlesEquivalent(episodes[i].Title, subtitle) {
+		if episodes[i].Title == "" || !subtitlesEquivalent(episodes[i].Title, subtitle) {
 			continue
 		}
 		matches++
@@ -319,6 +330,15 @@ func findUniqueEpisodeBySubtitle(subtitle string, episodes []annict.Episode) (*a
 	return match, matches
 }
 
+func genericFinalSubtitle(subtitle string) bool {
+	switch subtitleIdentityKey(subtitle) {
+	case "最終話", "最終回", "最終話sp", "最終回sp", "最終話スペシャル", "最終回スペシャル":
+		return true
+	default:
+		return false
+	}
+}
+
 // findFinalEpisode returns the uniquely highest positive-integer episode only
 // when Annict says the fetched list is complete. This avoids treating the
 // newest known episode of an incomplete or still-populating list as a finale.
@@ -326,9 +346,30 @@ func findFinalEpisode(work annict.Work, episodes []annict.Episode) *annict.Episo
 	if work.EpisodesCount <= 0 || len(episodes) < work.EpisodesCount {
 		return nil
 	}
+	var explicitFinal *annict.Episode
+	explicitFinalAmbiguous := false
+	for i := range episodes {
+		switch normalize.Normalize(strings.TrimSpace(episodes[i].NumberText)) {
+		case "最終話", "最終回":
+			if explicitFinal != nil && explicitFinal.ID != episodes[i].ID {
+				explicitFinalAmbiguous = true
+			} else {
+				explicitFinal = &episodes[i]
+			}
+		}
+	}
+	if explicitFinalAmbiguous {
+		return nil
+	}
+
 	var final *annict.Episode
 	maxNumber := 0
+	minNumber := 0
+	numberCount := 0
+	maxSortNumber := 0
 	duplicateMax := false
+	duplicateNumber := false
+	seenNumbers := make(map[int]bool)
 	for i := range episodes {
 		number, ok := EpisodeNumber(&episodes[i])
 		if !ok {
@@ -340,6 +381,21 @@ func findFinalEpisode(work annict.Work, episodes []annict.Episode) *annict.Episo
 			// Number in Annict but are not evidence for the TV finale.
 			continue
 		}
+		if seenNumbers[number] {
+			duplicateNumber = true
+			if number == maxNumber {
+				duplicateMax = true
+			}
+			continue
+		}
+		seenNumbers[number] = true
+		numberCount++
+		if minNumber == 0 || number < minNumber {
+			minNumber = number
+		}
+		if episodes[i].SortNumber > maxSortNumber {
+			maxSortNumber = episodes[i].SortNumber
+		}
 		switch {
 		case number > maxNumber:
 			maxNumber = number
@@ -348,6 +404,15 @@ func findFinalEpisode(work annict.Work, episodes []annict.Episode) *annict.Episo
 		case number == maxNumber:
 			duplicateMax = true
 		}
+	}
+	if explicitFinal != nil {
+		if numberCount == 0 || duplicateNumber || maxNumber-minNumber+1 != numberCount || explicitFinal.SortNumber <= maxSortNumber {
+			return nil
+		}
+		inferredNumber := float64(maxNumber + 1)
+		resolved := *explicitFinal
+		resolved.Number = &inferredNumber
+		return &resolved
 	}
 	if maxNumber == 0 || duplicateMax {
 		return nil

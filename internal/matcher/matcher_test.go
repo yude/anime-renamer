@@ -1004,6 +1004,37 @@ func TestMatchMapsFinalMarkerOnlyFromCompleteEpisodeList(t *testing.T) {
 	}
 }
 
+func TestMatchInfersExplicitUnnumberedFinalEpisodeFromUniqueSubtitle(t *testing.T) {
+	works := []annict.Work{{ID: 1, Title: "作品", EpisodesCount: 3}}
+	episodes := map[int][]annict.Episode{1: {
+		{ID: 101, NumberText: "第1話", SortNumber: 10, Title: "はじまり"},
+		{ID: 102, NumberText: "第2話", SortNumber: 20, Title: "再会"},
+		{ID: 103, NumberText: "最終話", SortNumber: 30, Title: "旅立ち"},
+	}}
+	meta := &parser.RecordingMetadata{WorkTitle: "作品", Subtitle: "旅立ち", FinalEpisode: true}
+	result := Match(meta, works, episodes, nil)
+	if result == nil || result.Episode == nil || result.Episode.ID != 103 || result.Confidence < AutoRenameThreshold {
+		t.Fatalf("Match() = %+v, want inferred final episode 3", result)
+	}
+	if number, ok := EpisodeNumber(result.Episode); !ok || number != 3 {
+		t.Errorf("EpisodeNumber() = %d, %v; want 3, true", number, ok)
+	}
+}
+
+func TestMatchDoesNotOverrideMeaningfulFinalSubtitleMismatch(t *testing.T) {
+	works := []annict.Work{{ID: 1, Title: "作品", EpisodesCount: 3}}
+	episodes := map[int][]annict.Episode{1: {
+		{ID: 101, Number: float64Ptr(1), Title: "はじまり"},
+		{ID: 102, Number: float64Ptr(2), Title: "再会"},
+		{ID: 103, Number: float64Ptr(3), Title: "旅立ち"},
+	}}
+	meta := &parser.RecordingMetadata{WorkTitle: "作品", Subtitle: "別の結末", FinalEpisode: true}
+	result := Match(meta, works, episodes, nil)
+	if result == nil || result.Episode != nil || result.Confidence >= AutoRenameThreshold {
+		t.Errorf("Match() = %+v, want meaningful subtitle mismatch to remain unresolved", result)
+	}
+}
+
 func TestMatchRejectsFinalMarkerWhenEpisodeListIsIncomplete(t *testing.T) {
 	works := []annict.Work{{ID: 1, Title: "作品", EpisodesCount: 3}}
 	episodes := map[int][]annict.Episode{1: {
