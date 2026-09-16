@@ -44,13 +44,14 @@ var (
 
 	// Reject notations that cannot be represented as one positive integer
 	// before trying the permissive single-episode patterns below.
-	fractionalHashPattern    = regexp.MustCompile(`[#＃♯][\s\x{3000}]*[0-9０-９]+[.．][0-9０-９]+`)
-	fractionalEpisodePattern = regexp.MustCompile(`(?:第[\s\x{3000}]*)?[0-9０-９]+[.．][0-9０-９]+[\s\x{3000}]*話`)
-	fractionalEPPattern      = regexp.MustCompile(`[eEｅＥ][pPｐＰ][.．\s\x{3000}]*[0-9０-９]+[.．][0-9０-９]+`)
-	multiHashPattern         = regexp.MustCompile(`[#＃♯][\s\x{3000}]*[0-9０-９]+[\s\x{3000}]*(?:[,，、・&＆/／~〜～]|[-－―ー][\s\x{3000}]*[#＃♯]?[\s\x{3000}]*[0-9０-９]+)`)
-	multiBareEpisodePattern  = regexp.MustCompile(`[0-9０-９]+[\s\x{3000}]*話[\s\x{3000}]*(?:[,，、・&＆/／~〜～－―ー-])[\s\x{3000}]*(?:第[\s\x{3000}]*)?[0-9０-９]+[\s\x{3000}]*話`)
-	multiEpisodeListPattern  = regexp.MustCompile(`(?:第[\s\x{3000}]*)?[0-9０-９]+(?:[\s\x{3000}]*[,，、&＆/／][\s\x{3000}]*[0-9０-９]+)+[\s\x{3000}]*話`)
-	separatedHashEpisodes    = regexp.MustCompile(`[#＃♯][\s\x{3000}]*[0-9０-９]+[^#＃♯]*(?:[／/]|[」』])[\s\x{3000}]*[#＃♯][\s\x{3000}]*[0-9０-９]+(?:[\s\x{3000}]|[「『]|$)`)
+	fractionalHashPattern            = regexp.MustCompile(`[#＃♯][\s\x{3000}]*[0-9０-９]+[.．][0-9０-９]+`)
+	fractionalEpisodePattern         = regexp.MustCompile(`(?:第[\s\x{3000}]*)?[0-9０-９]+[.．][0-9０-９]+[\s\x{3000}]*話`)
+	fractionalEPPattern              = regexp.MustCompile(`[eEｅＥ][pPｐＰ][.．\s\x{3000}]*[0-9０-９]+[.．][0-9０-９]+`)
+	multiHashPattern                 = regexp.MustCompile(`[#＃♯][\s\x{3000}]*[0-9０-９]+[\s\x{3000}]*(?:[,，、・&＆/／~〜～]|[-－―ー][\s\x{3000}]*[#＃♯]?[\s\x{3000}]*[0-9０-９]+)`)
+	multiBareEpisodePattern          = regexp.MustCompile(`[0-9０-９]+[\s\x{3000}]*話[\s\x{3000}]*(?:[,，、・&＆/／~〜～－―ー-])[\s\x{3000}]*(?:第[\s\x{3000}]*)?[0-9０-９]+[\s\x{3000}]*話`)
+	multiTrailingEpisodeRangePattern = regexp.MustCompile(`[0-9０-９]+[\s\x{3000}]*[~〜～－―ー-][\s\x{3000}]*[0-9０-９]+[\s\x{3000}]*話`)
+	multiEpisodeListPattern          = regexp.MustCompile(`(?:第[\s\x{3000}]*)?[0-9０-９]+(?:[\s\x{3000}]*[,，、&＆/／][\s\x{3000}]*[0-9０-９]+)+[\s\x{3000}]*話`)
+	separatedHashEpisodes            = regexp.MustCompile(`[#＃♯][\s\x{3000}]*[0-9０-９]+[^#＃♯]*(?:[／/]|[」』])[\s\x{3000}]*[#＃♯][\s\x{3000}]*[0-9０-９]+(?:[\s\x{3000}]|[「『]|$)`)
 
 	// Episode patterns matching both full-width and half-width forms.
 	// These run against the ORIGINAL string (pre-normalization).
@@ -227,6 +228,7 @@ func ambiguousEpisodeNotation(name string) string {
 		fractionalEPPattern,
 		multiHashPattern,
 		multiBareEpisodePattern,
+		multiTrailingEpisodeRangePattern,
 		multiEpisodeListPattern,
 		separatedHashEpisodes,
 	} {
@@ -459,6 +461,8 @@ func japaneseQuoteClose(open rune) (rune, bool) {
 		return '」', true
 	case '『':
 		return '』', true
+	case '［':
+		return '］', true
 	default:
 		return 0, false
 	}

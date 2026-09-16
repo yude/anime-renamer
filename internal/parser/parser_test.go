@@ -747,6 +747,13 @@ func TestParseFilename(t *testing.T) {
 			wantEp:    1,
 			wantSub:   "上の巻『帰ってきた救世主』",
 		},
+		{
+			name:      "full width square brackets delimit subtitle",
+			input:     "『鬼滅の刃』第一夜［兄妹の絆］【劇場版『無限列車編』】.mp4",
+			wantTitle: "鬼滅の刃",
+			wantEp:    1,
+			wantSub:   "兄妹の絆",
+		},
 
 		// === Error cases ===
 		{
@@ -807,6 +814,11 @@ func TestParseFilename(t *testing.T) {
 		{
 			name:    "bare episode range is rejected",
 			input:   "作品 10話／11話.mp4",
+			wantErr: true,
+		},
+		{
+			name:    "episode range with one trailing suffix is rejected",
+			input:   "TVアニメ『はたらく細胞』1～4話.mp4",
 			wantErr: true,
 		},
 	}
