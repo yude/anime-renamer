@@ -644,6 +644,15 @@ func TestSubtitlesEquivalentForScoringToleratesOnlyOneLongSubtitleInsertion(t *t
 	}
 }
 
+func TestSubtitlesEquivalentStripsKomiSegmentNumber(t *testing.T) {
+	if !subtitlesEquivalent("メリークリスマス…です。", "コミュ５６ メリークリスマス…です。") {
+		t.Fatal("Komi EPG segment number should not hide an otherwise exact subtitle")
+	}
+	if subtitlesEquivalent("ケーションです。", "コミュニケーションです。") {
+		t.Fatal("ordinary word beginning with コミュ must remain meaningful")
+	}
+}
+
 func TestMatchSubtitlePresentationVariantsReachThreshold(t *testing.T) {
 	works := []annict.Work{{ID: 1, Title: "作品"}}
 	for i, tt := range []struct {

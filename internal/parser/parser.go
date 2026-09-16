@@ -319,6 +319,10 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 
 	// 3. Strip metadata tags (SCRename rp1 equivalent)
 	name = StripMetadataTags(name)
+	// Trailing broadcast flags sit after a quoted subtitle in many EPG names.
+	// Remove them before trying to decide whether the final quoted component is
+	// an episode subtitle; work-title cleanup alone happens too late.
+	name = stripTrailingMetadataTags(name)
 
 	// Check if anything meaningful remains after tag stripping
 	remaining := strings.ReplaceAll(name, ".", "")

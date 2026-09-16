@@ -688,6 +688,18 @@ func TestParseFilename(t *testing.T) {
 			wantSub:   "コミ４４ 冬の訪れです。 ほか",
 		},
 		{
+			name:      "numberless trailing subtitle before broadcast flag",
+			input:     "古見さんは、コミュ症です。「コミュ５６ メリークリスマス…です。」[字] (2022_04_28).mp4",
+			wantTitle: "古見さんは、コミュ症です。",
+			wantSub:   "コミュ５６ メリークリスマス…です。",
+		},
+		{
+			name:      "numberless trailing subtitle before multiple broadcast flags",
+			input:     "ＳＰＹ×ＦＡＭＩＬＹ「プロジェクト〈アップル〉」[解][字][デ] (2022_10_03).mp4",
+			wantTitle: "ＳＰＹ×ＦＡＭＩＬＹ",
+			wantSub:   "プロジェクト〈アップル〉",
+		},
+		{
 			name:      "numberless final episode with subtitle",
 			input:     "あの日見た花の名前を僕達はまだ知らない。[終]最終話「あの夏に咲く花」 (2021_09_26).mp4",
 			wantTitle: "あの日見た花の名前を僕達はまだ知らない。",
