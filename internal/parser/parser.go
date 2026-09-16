@@ -52,6 +52,7 @@ var (
 	multiTrailingEpisodeRangePattern = regexp.MustCompile(`[0-9０-９]+[\s\x{3000}]*[~〜～－―ー-][\s\x{3000}]*[0-9０-９]+[\s\x{3000}]*話`)
 	multiEpisodeListPattern          = regexp.MustCompile(`(?:第[\s\x{3000}]*)?[0-9０-９]+(?:[\s\x{3000}]*[,，、&＆/／][\s\x{3000}]*[0-9０-９]+)+[\s\x{3000}]*話`)
 	separatedHashEpisodes            = regexp.MustCompile(`[#＃♯][\s\x{3000}]*[0-9０-９]+[^#＃♯]*(?:[／/]|[」』])[\s\x{3000}]*[#＃♯][\s\x{3000}]*[0-9０-９]+(?:[\s\x{3000}]|[「『]|$)`)
+	separatedNumberedEpisodes        = regexp.MustCompile(`(?:第[\s\x{3000}]*)?[0-9０-９]+[\s\x{3000}]*話.*[,，、／/][\s\x{3000}]*(?:第[\s\x{3000}]*)?[0-9０-９]+[\s\x{3000}]*話`)
 	parenthesizedEpisodeRangePattern = regexp.MustCompile(`[（(][\s\x{3000}]*[0-9０-９]{1,3}[\s\x{3000}]*[）)][\s\x{3000}]*[~〜～－―ー-][\s\x{3000}]*[（(][\s\x{3000}]*[0-9０-９]{1,3}[\s\x{3000}]*[）)]`)
 
 	// Episode patterns matching both full-width and half-width forms.
@@ -241,6 +242,7 @@ func ambiguousEpisodeNotation(name string) string {
 		multiTrailingEpisodeRangePattern,
 		multiEpisodeListPattern,
 		separatedHashEpisodes,
+		separatedNumberedEpisodes,
 		parenthesizedEpisodeRangePattern,
 	} {
 		if match := pattern.FindString(name); match != "" {

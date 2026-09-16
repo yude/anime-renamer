@@ -893,6 +893,11 @@ func TestParseFilename(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name:    "separated numbered episodes with subtitles are rejected",
+			input:   "作品 第7話「前半」，第8話「後半」.mp4",
+			wantErr: true,
+		},
+		{
 			name:    "bare episode range is rejected",
 			input:   "作品 10話／11話.mp4",
 			wantErr: true,
