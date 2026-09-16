@@ -405,8 +405,12 @@ func TestEpisodeNumberUsesNumberTextBeforeInternalSortOrder(t *testing.T) {
 		want int
 	}{
 		{text: "第6話", want: 6},
+		{text: "第10局", want: 10},
 		{text: "＃１３", want: 13},
 		{text: "episode 2", want: 2},
+		{text: "EPISODE.12", want: 12},
+		{text: "SAILING 26", want: 26},
+		{text: "第十四話", want: 14},
 	} {
 		episode := &annict.Episode{NumberText: tt.text, SortNumber: tt.want * 10}
 		if got, ok := EpisodeNumber(episode); !ok || got != tt.want {

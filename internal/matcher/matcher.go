@@ -33,8 +33,8 @@ const (
 
 var seriesContinuationPattern = regexp.MustCompile(`^(?:第?[0-9]+(?:期|クール(?:目)?)|season[0-9]+|[0-9]+(?:st|nd|rd|th)(?:season|シーズン)|シーズン[0-9]+|part[0-9]+|netflixオリジナル|tv放送)`)
 
-var episodeNumberTextPattern = regexp.MustCompile(`(?i)^(?:第\s*([0-9]+)\s*話|#\s*([0-9]+)|episode\s*([0-9]+)|([0-9]+))$`)
-var kanjiEpisodeNumberTextPattern = regexp.MustCompile(`^第\s*[〇一二三四五六七八九十百千壱弐参肆伍陸漆捌玖拾]+\s*話$`)
+var episodeNumberTextPattern = regexp.MustCompile(`(?i)^(?:第\s*([0-9]+)\s*(?:話|幕|番|怪|夜|回|局|羽|R)|#\s*([0-9]+)|episode[.\s]*([0-9]+)|sailing\s*([0-9]+)|([0-9]+))$`)
+var kanjiEpisodeNumberTextPattern = regexp.MustCompile(`^第\s*([〇一二三四五六七八九十百千壱弐参肆伍陸漆捌玖拾]+)\s*(?:話|幕|番|怪|夜|回|局|羽|R)$`)
 var subtitleSegmentOrdinalPrefix = regexp.MustCompile(`(?i)^(?:episode[0-9]+|其の[0-9一二三四五六七八九十]+)`)
 
 // Season mapping from month to Annict season name. Each season is exactly
@@ -452,16 +452,20 @@ func EpisodeNumber(e *annict.Episode) (int, bool) {
 		return integer, true
 	}
 	if strings.TrimSpace(e.NumberText) != "" {
-		matches := episodeNumberTextPattern.FindStringSubmatch(normalize.Normalize(strings.TrimSpace(e.NumberText)))
-		if matches == nil {
+		numberText := normalize.Normalize(strings.TrimSpace(e.NumberText))
+		if matches := episodeNumberTextPattern.FindStringSubmatch(numberText); matches != nil {
+			for _, digits := range matches[1:] {
+				if digits == "" {
+					continue
+				}
+				number, err := strconv.Atoi(digits)
+				return number, err == nil && number > 0
+			}
 			return 0, false
 		}
-		for _, digits := range matches[1:] {
-			if digits == "" {
-				continue
-			}
-			number, err := strconv.Atoi(digits)
-			return number, err == nil && number > 0
+		if matches := kanjiEpisodeNumberTextPattern.FindStringSubmatch(numberText); matches != nil {
+			number, ok := parser.ParseKanjiNumber(matches[1])
+			return number, ok && number > 0
 		}
 		return 0, false
 	}

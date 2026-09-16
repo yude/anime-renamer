@@ -181,6 +181,12 @@ func kanjiToInt(s string) (int, bool) {
 	return result, true
 }
 
+// ParseKanjiNumber converts a formal Japanese numeral used in external
+// episode metadata. It shares the filename parser's validated numeral rules.
+func ParseKanjiNumber(s string) (int, bool) {
+	return kanjiToInt(s)
+}
+
 func decimalEpisodeNumber(s string) (int, error) {
 	number, err := strconv.Atoi(normalize.Normalize(s))
 	if err != nil {
