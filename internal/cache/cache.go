@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/yude/anime-renamer/internal/annict"
+	"github.com/yude/anime-renamer/internal/syobocal"
 )
 
 const (
@@ -198,6 +199,47 @@ func (c *Cache) SetEpisodes(workID int, episodes []annict.Episode) error {
 	}
 
 	return writeJSONAtomic(path, entry)
+}
+
+// GetSyobocalPrograms retrieves cached schedule rows for one title and JST
+// date. Empty slices are valid cached results and prevent repeated API calls.
+func (c *Cache) GetSyobocalPrograms(tid int, date time.Time) ([]syobocal.Program, bool) {
+	if !c.enabled || tid <= 0 || date.IsZero() {
+		return nil, false
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	data, err := readCacheFile(c.syobocalPath(tid, date))
+	if err != nil {
+		return nil, false
+	}
+	var entry cacheEntry[[]syobocal.Program]
+	if err := json.Unmarshal(data, &entry); err != nil || !cacheEntryFresh(entry.CachedAt, c.ttl) {
+		return nil, false
+	}
+	return entry.Data, true
+}
+
+// SetSyobocalPrograms caches schedule rows for one title and JST date.
+func (c *Cache) SetSyobocalPrograms(tid int, date time.Time, programs []syobocal.Program) error {
+	if !c.enabled {
+		return nil
+	}
+	if tid <= 0 || date.IsZero() {
+		return fmt.Errorf("cache syobocal programs: invalid TID or date")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry := cacheEntry[[]syobocal.Program]{Data: programs, CachedAt: time.Now()}
+	return writeJSONAtomic(c.syobocalPath(tid, date), entry)
+}
+
+func (c *Cache) syobocalPath(tid int, date time.Time) string {
+	dateKey := date.In(time.FixedZone("JST", 9*60*60)).Format("2006-01-02")
+	return filepath.Join(c.dir, fmt.Sprintf("syobocal_%d_%s.json", tid, dateKey))
 }
 
 // Clear removes all cached files.

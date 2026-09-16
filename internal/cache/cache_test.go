@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/yude/anime-renamer/internal/annict"
+	"github.com/yude/anime-renamer/internal/syobocal"
 )
 
 func TestWorkRoundTrip(t *testing.T) {
@@ -211,9 +212,36 @@ func TestDisabledCacheNeverPersists(t *testing.T) {
 	if _, ok := c.GetEpisodes(1); ok {
 		t.Error("GetEpisodes() on disabled cache should always miss")
 	}
+	if err := c.SetSyobocalPrograms(1, time.Now(), []syobocal.Program{{PID: 1}}); err != nil {
+		t.Fatalf("SetSyobocalPrograms() on disabled cache error = %v", err)
+	}
+	if _, ok := c.GetSyobocalPrograms(1, time.Now()); ok {
+		t.Error("GetSyobocalPrograms() on disabled cache should always miss")
+	}
 
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Error("disabled cache must not create the cache directory")
+	}
+}
+
+func TestSyobocalProgramsRoundTripAndDateIsolation(t *testing.T) {
+	dir := t.TempDir()
+	c := New(dir)
+	jst := time.FixedZone("JST", 9*60*60)
+	date := time.Date(2022, 9, 23, 0, 0, 0, 0, jst)
+	want := []syobocal.Program{{PID: 1, TID: 6373, ChannelID: 5, Count: 12, StartedAt: date.Add(time.Hour)}}
+	if err := c.SetSyobocalPrograms(6373, date, want); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := c.GetSyobocalPrograms(6373, date)
+	if !ok || len(got) != 1 || got[0].PID != 1 || got[0].Count != 12 {
+		t.Fatalf("GetSyobocalPrograms() = %+v, %v; want cached row", got, ok)
+	}
+	if _, ok := c.GetSyobocalPrograms(6373, date.AddDate(0, 0, 1)); ok {
+		t.Fatal("different date unexpectedly hit Syobocal cache")
+	}
+	if _, ok := c.GetSyobocalPrograms(6374, date); ok {
+		t.Fatal("different TID unexpectedly hit Syobocal cache")
 	}
 }
 

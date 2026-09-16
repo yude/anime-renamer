@@ -9,15 +9,18 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/yude/anime-renamer/internal/annict"
 	"github.com/yude/anime-renamer/internal/cache"
+	"github.com/yude/anime-renamer/internal/dateinfer"
 	"github.com/yude/anime-renamer/internal/matcher"
 	"github.com/yude/anime-renamer/internal/normalize"
 	"github.com/yude/anime-renamer/internal/parser"
 	"github.com/yude/anime-renamer/internal/renamer"
+	"github.com/yude/anime-renamer/internal/syobocal"
 )
 
 func main() {
@@ -63,6 +66,7 @@ func main() {
 
 	// Initialize components
 	annictClient := annict.NewClient(token)
+	syobocalClient := syobocal.NewClient()
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -101,7 +105,7 @@ func main() {
 	failed := 0
 
 	for _, file := range files {
-		result := processFile(file, annictClient, c, workCache, episodesCache, programsCache, plannedDestinations, *dryRun, *verbose, *confidenceThreshold, *outputDir)
+		result := processFile(file, annictClient, c, workCache, episodesCache, programsCache, plannedDestinations, *dryRun, *verbose, *confidenceThreshold, *outputDir, syobocalClient)
 
 		switch {
 		case result.Error != nil:
@@ -142,6 +146,10 @@ func exitCodeForFailures(failed int) int {
 	return 0
 }
 
+type syobocalProgramClient interface {
+	GetPrograms(tid int, date time.Time) ([]syobocal.Program, error)
+}
+
 func processFile(
 	file string,
 	client *annict.Client,
@@ -153,6 +161,7 @@ func processFile(
 	dryRun, verbose bool,
 	confidenceThreshold int,
 	outputDir string,
+	syobocalClients ...syobocalProgramClient,
 ) *renamer.RenameResult {
 	baseName := filepath.Base(file)
 	fmt.Fprintf(os.Stderr, "Processing: %s\n", baseName)
@@ -182,7 +191,8 @@ func processFile(
 		meta.WorkTitle, meta.EpisodeNumber, meta.Subtitle,
 		meta.RecordedDate.Format("2006-01-02"))
 	numberlessRecovery := meta.EpisodeNumber <= 0
-	if meta.EpisodeNumber <= 0 && meta.Subtitle == "" && !meta.FinalEpisode {
+	dateOnlyRecovery := isDateOnlyRecoveryCandidate(meta)
+	if meta.EpisodeNumber <= 0 && meta.Subtitle == "" && !meta.FinalEpisode && !dateOnlyRecovery {
 		return &renamer.RenameResult{
 			OriginalPath: file,
 			SkipReason:   fmt.Sprintf("no supported single episode number, subtitle, or final-episode marker found in %q", baseName),
@@ -230,6 +240,26 @@ func processFile(
 
 	fmt.Fprintf(os.Stderr, "  Annict:    %d work candidate(s): %s\n", len(works), workTitles(works))
 
+	// Work entries cached before Syobocal support do not contain a TID. Refresh
+	// only a date-only candidate so existing numbered paths retain their current
+	// cache behavior and date inference does not remain disabled for seven days.
+	if dateOnlyRecovery && len(works) == 1 && works[0].SyobocalTID == "" {
+		refreshed, refreshErr := refreshWorkMetadata(client, c, meta.WorkTitle, workCache, episodesCache)
+		if refreshErr != nil {
+			return &renamer.RenameResult{
+				OriginalPath: file,
+				SkipReason:   fmt.Sprintf("date-only episode could not refresh Annict metadata: %v", refreshErr),
+			}
+		}
+		works = refreshed
+		if len(works) == 0 {
+			return &renamer.RenameResult{
+				OriginalPath: file,
+				SkipReason:   fmt.Sprintf("date-only episode could not uniquely refresh Annict work %q", meta.WorkTitle),
+			}
+		}
+	}
+
 	// Step 3: Get episodes for each candidate work
 	for _, w := range works {
 		if _, ok := episodesCache[w.ID]; !ok {
@@ -247,7 +277,22 @@ func processFile(
 	// data. Programs only verify the already-selected episode; they do not
 	// participate in work disambiguation, so fetching them for every work
 	// candidate wastes one API request per rejected candidate.
-	result := matcher.Match(meta, works, episodesCache, nil)
+	var result *matcher.MatchResult
+	if dateOnlyRecovery {
+		var scheduleClient syobocalProgramClient
+		if len(syobocalClients) > 0 {
+			scheduleClient = syobocalClients[0]
+		}
+		result, err = matchDateOnly(meta, works, episodesCache, c, scheduleClient)
+		if err != nil {
+			return &renamer.RenameResult{
+				OriginalPath: file,
+				SkipReason:   fmt.Sprintf("date-only episode could not be verified: %v", err),
+			}
+		}
+	} else {
+		result = matcher.Match(meta, works, episodesCache, nil)
+	}
 	if result == nil {
 		if numberlessRecovery {
 			return &renamer.RenameResult{
@@ -265,7 +310,7 @@ func processFile(
 	// newer, explicitly labelled continuation or remake. If the selected
 	// episode contradicts the file subtitle, give those related works a chance
 	// to provide a stronger match instead of stopping at the first number.
-	shouldRetryRelated := result.Episode == nil || (meta.Subtitle != "" && result.Confidence < matcher.AutoRenameThreshold)
+	shouldRetryRelated := !dateOnlyRecovery && (result.Episode == nil || (meta.Subtitle != "" && result.Confidence < matcher.AutoRenameThreshold))
 	if shouldRetryRelated {
 		relatedWorks, relatedErr := searchRelatedWorks(client, c, meta.WorkTitle, workCache, episodesCache)
 		if relatedErr != nil {
@@ -285,7 +330,7 @@ func processFile(
 	// details. Programs do not alter the selected work or episode, so a normal
 	// exact match that already meets the threshold needs no extra API round
 	// trip. The in-memory cache remains keyed by work and recording date.
-	needsProgram := verbose || result.Confidence < confidenceThreshold
+	needsProgram := !dateOnlyRecovery && (verbose || result.Confidence < confidenceThreshold)
 	if needsProgram && result.Work != nil && result.Episode != nil && !meta.RecordedDate.IsZero() {
 		programs, err := getPrograms(client, result.Work.ID, meta.RecordedDate, programsCache)
 		if err != nil {
@@ -374,6 +419,19 @@ func processFile(
 	return result2
 }
 
+func isDateOnlyRecoveryCandidate(meta *parser.RecordingMetadata) bool {
+	if meta == nil || meta.EpisodeNumber > 0 || meta.Subtitle != "" || meta.FinalEpisode || meta.RecordedDate.IsZero() {
+		return false
+	}
+	title := normalize.Normalize(meta.WorkTitle)
+	for _, marker := range []string{"総集編", "特別編", "特番", "スペシャル", "一挙放送", "セレクション", "劇場版", "映画"} {
+		if strings.Contains(title, marker) {
+			return false
+		}
+	}
+	return true
+}
+
 func directoryTitleHint(file, parsedTitle string) (string, bool) {
 	dir := filepath.Clean(filepath.Dir(file))
 	hint := filepath.Base(dir)
@@ -392,6 +450,64 @@ func workTitles(works []annict.Work) string {
 		titles[i] = fmt.Sprintf("%q", w.Title)
 	}
 	return strings.Join(titles, ", ")
+}
+
+func refreshWorkMetadata(client *annict.Client, c *cache.Cache, title string, wc map[string][]annict.Work, ec map[int][]annict.Episode) ([]annict.Work, error) {
+	works, episodesByWork, err := client.SearchWorks(title)
+	if err != nil {
+		return nil, err
+	}
+	works = matcher.MatchingWorks(title, works)
+	wc[title] = works
+	if len(works) == 1 {
+		_ = c.SetWork(title, &works[0])
+	}
+	for _, work := range works {
+		episodes, ok := episodesByWork[work.ID]
+		if !ok || !episodesComplete(work, episodes) {
+			continue
+		}
+		ec[work.ID] = episodes
+		_ = c.SetEpisodes(work.ID, episodes)
+	}
+	return works, nil
+}
+
+func matchDateOnly(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork map[int][]annict.Episode, c *cache.Cache, client syobocalProgramClient) (*matcher.MatchResult, error) {
+	if len(works) != 1 {
+		return nil, fmt.Errorf("Annict work is ambiguous (%d candidates)", len(works))
+	}
+	work := works[0]
+	tid, err := strconv.Atoi(work.SyobocalTID)
+	if err != nil || tid <= 0 {
+		return nil, fmt.Errorf("Annict work %q has no valid Syobocal TID", work.Title)
+	}
+	if client == nil {
+		return nil, fmt.Errorf("Syobocal client is unavailable")
+	}
+
+	programs, cached := c.GetSyobocalPrograms(tid, meta.RecordedDate)
+	if !cached {
+		programs, err = client.GetPrograms(tid, meta.RecordedDate)
+		if err != nil {
+			return nil, err
+		}
+		_ = c.SetSyobocalPrograms(tid, meta.RecordedDate, programs)
+	}
+
+	episode, reason := dateinfer.ResolveUnique(meta.RecordedDate, episodesByWork[work.ID], programs)
+	if episode == nil {
+		return nil, errors.New(reason)
+	}
+	return &matcher.MatchResult{
+		Work:       &work,
+		Episode:    episode,
+		Confidence: matcher.AutoRenameThreshold,
+		Reasons: []string{
+			"work title uniquely matched Annict",
+			reason,
+		},
+	}, nil
 }
 
 func searchWork(client *annict.Client, c *cache.Cache, title string, wc map[string][]annict.Work, ec map[int][]annict.Episode) ([]annict.Work, error) {

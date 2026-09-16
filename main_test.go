@@ -19,6 +19,7 @@ import (
 	"github.com/yude/anime-renamer/internal/matcher"
 	"github.com/yude/anime-renamer/internal/parser"
 	"github.com/yude/anime-renamer/internal/renamer"
+	"github.com/yude/anime-renamer/internal/syobocal"
 )
 
 func writeEnvFile(t *testing.T, dir, token string) {
@@ -668,6 +669,116 @@ func TestProcessFileRetriesRelatedWorkAfterSubtitleMismatch(t *testing.T) {
 
 func TestProcessFileNoEpisodeDoesNotContactAnnict(t *testing.T) {
 	testProcessFileSkippedWithoutAnnict(t, "作品 総集編 (20260801).mp4", "no supported single episode number")
+}
+
+func TestProcessFileResolvesDateOnlyFromUniqueSyobocalSchedule(t *testing.T) {
+	annictServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/graphql" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[
+			{"node":{"annictId":1,"title":"作品","syobocalTid":6373,"episodesCount":2,"episodes":{"edges":[
+				{"node":{"annictId":101,"number":1,"sortNumber":1,"title":"はじまり"}},
+				{"node":{"annictId":102,"number":2,"sortNumber":2,"title":"つづき"}}
+			]}}}
+		]}}}`)
+	}))
+	defer annictServer.Close()
+
+	syobocalServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("TID"); got != "6373" {
+			t.Errorf("Syobocal TID = %q, want 6373", got)
+		}
+		fmt.Fprint(w, `<ProgLookupResponse><ProgItems><ProgItem><PID>10</PID><TID>6373</TID><StTime>2022-09-23 01:00:00</StTime><EdTime>2022-09-23 01:30:00</EdTime><Count>2</Count><Deleted>0</Deleted><Warn>0</Warn><ChID>5</ChID><STSubTitle>つづき</STSubTitle></ProgItem></ProgItems><Result><Code>200</Code></Result></ProgLookupResponse>`)
+	}))
+	defer syobocalServer.Close()
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "作品 (20220923).mp4")
+	if err := os.WriteFile(file, []byte("recording"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	client := annict.NewClientWithURLs("token", annictServer.URL, annictServer.URL+"/graphql")
+	result := processFile(
+		file,
+		client,
+		cache.NewDisabled(filepath.Join(dir, "cache")),
+		make(map[string][]annict.Work),
+		make(map[int][]annict.Episode),
+		make(map[programsCacheKey][]annict.Program),
+		make(map[string]string),
+		true,
+		false,
+		matcher.AutoRenameThreshold,
+		"",
+		syobocal.NewClientWithBaseURL(syobocalServer.URL),
+	)
+	if result.Error != nil || result.SkipReason != "" || !result.Previewed || result.EpisodeNum != 2 {
+		t.Fatalf("processFile() = %+v, want date-only episode 2 preview", result)
+	}
+}
+
+func TestProcessFileDateOnlyScheduleAmbiguityIsSafeSkip(t *testing.T) {
+	annictServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[{"node":{"annictId":1,"title":"作品","syobocalTid":6373,"episodesCount":2,"episodes":{"edges":[{"node":{"annictId":101,"number":1,"title":"一"}},{"node":{"annictId":102,"number":2,"title":"二"}}]}}}]}}}`)
+	}))
+	defer annictServer.Close()
+	syobocalServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<ProgLookupResponse><ProgItems><ProgItem><PID>1</PID><TID>6373</TID><StTime>2022-09-23 01:00:00</StTime><EdTime>2022-09-23 01:30:00</EdTime><Count>1</Count><ChID>5</ChID></ProgItem><ProgItem><PID>2</PID><TID>6373</TID><StTime>2022-09-23 02:00:00</StTime><EdTime>2022-09-23 02:30:00</EdTime><Count>2</Count><ChID>8</ChID></ProgItem></ProgItems><Result><Code>200</Code></Result></ProgLookupResponse>`)
+	}))
+	defer syobocalServer.Close()
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "作品 (20220923).mp4")
+	if err := os.WriteFile(file, []byte("recording"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result := processFile(
+		file,
+		annict.NewClientWithURLs("token", annictServer.URL, annictServer.URL),
+		cache.NewDisabled(filepath.Join(dir, "cache")),
+		make(map[string][]annict.Work),
+		make(map[int][]annict.Episode),
+		make(map[programsCacheKey][]annict.Program),
+		make(map[string]string),
+		true,
+		false,
+		matcher.AutoRenameThreshold,
+		"",
+		syobocal.NewClientWithBaseURL(syobocalServer.URL),
+	)
+	if result.Error != nil || result.SkipReason == "" || result.Previewed || !strings.Contains(result.SkipReason, "ambiguous") {
+		t.Fatalf("processFile() = %+v, want ambiguous date-only safe skip", result)
+	}
+}
+
+func TestRefreshWorkMetadataUpgradesPreSyobocalCacheEntry(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[{"node":{"annictId":1,"title":"作品","syobocalTid":6373,"episodesCount":1,"episodes":{"edges":[{"node":{"annictId":101,"number":1,"title":"一"}}]}}}]}}}`)
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	c := cache.New(filepath.Join(dir, "cache"))
+	if err := c.SetWork("作品", &annict.Work{ID: 1, Title: "作品"}); err != nil {
+		t.Fatal(err)
+	}
+	wc := make(map[string][]annict.Work)
+	ec := make(map[int][]annict.Episode)
+	works, err := refreshWorkMetadata(annict.NewClientWithURLs("token", server.URL, server.URL), c, "作品", wc, ec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(works) != 1 || works[0].SyobocalTID != "6373" || len(ec[1]) != 1 {
+		t.Fatalf("refreshWorkMetadata() works=%+v episodes=%+v", works, ec)
+	}
+	if cached, ok := c.GetWork("作品"); !ok || cached.SyobocalTID != "6373" {
+		t.Fatalf("refreshed work was not persisted: %+v, %v", cached, ok)
+	}
 }
 
 func TestProcessFileNoMeaningfulContentDoesNotContactAnnict(t *testing.T) {

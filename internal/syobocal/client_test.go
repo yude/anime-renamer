@@ -59,7 +59,7 @@ func TestGetProgramsRejectsUnsafeResponses(t *testing.T) {
 		{name: "HTTP status", code: http.StatusTooManyRequests, want: "HTTP 429"},
 		{name: "API status", body: `<ProgLookupResponse><Result><Code>500</Code><Message>bad query</Message></Result></ProgLookupResponse>`, want: "result 500"},
 		{name: "invalid XML", body: `<ProgLookupResponse>`, want: "decode ProgLookup"},
-		{name: "invalid timestamp", body: `<ProgLookupResponse><ProgItems><ProgItem><PID>1</PID><StTime>bad</StTime><EdTime>2022-09-23 01:00:00</EdTime></ProgItem></ProgItems><Result><Code>200</Code></Result></ProgLookupResponse>`, want: "start time"},
+		{name: "invalid timestamp", body: `<ProgLookupResponse><ProgItems><ProgItem><PID>1</PID><TID>1</TID><StTime>bad</StTime><EdTime>2022-09-23 01:00:00</EdTime></ProgItem></ProgItems><Result><Code>200</Code></Result></ProgLookupResponse>`, want: "start time"},
 	}
 
 	for _, tt := range tests {

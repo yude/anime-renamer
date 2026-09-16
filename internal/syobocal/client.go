@@ -25,15 +25,15 @@ var jst = time.FixedZone("JST", 9*60*60)
 // Program is one ProgLookup broadcast row. Only fields used to establish a
 // safe episode identity are retained.
 type Program struct {
-	PID       int
-	TID       int
-	ChannelID int
-	Count     int
-	StartedAt time.Time
-	EndedAt   time.Time
-	Subtitle  string
-	Deleted   bool
-	Warn      bool
+	PID       int       `json:"pid"`
+	TID       int       `json:"tid"`
+	ChannelID int       `json:"channel_id"`
+	Count     int       `json:"count"`
+	StartedAt time.Time `json:"started_at"`
+	EndedAt   time.Time `json:"ended_at"`
+	Subtitle  string    `json:"subtitle"`
+	Deleted   bool      `json:"deleted"`
+	Warn      bool      `json:"warn"`
 }
 
 type xmlProgram struct {
@@ -149,6 +149,9 @@ func (c *Client) GetPrograms(tid int, date time.Time) ([]Program, error) {
 
 	programs := make([]Program, 0, len(decoded.Programs))
 	for _, item := range decoded.Programs {
+		if item.TID != tid {
+			return nil, fmt.Errorf("ProgLookup returned unexpected TID %d for requested TID %d", item.TID, tid)
+		}
 		startedAt, err := time.ParseInLocation("2006-01-02 15:04:05", item.StartedAt, jst)
 		if err != nil {
 			return nil, fmt.Errorf("decode ProgLookup PID %d start time: %w", item.PID, err)
