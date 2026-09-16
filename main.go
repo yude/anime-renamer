@@ -597,15 +597,15 @@ func refreshWorkMetadata(client *annict.Client, c *cache.Cache, title string, wc
 
 func matchDateOnly(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork map[int][]annict.Episode, c *cache.Cache, client syobocalProgramClient, batch *batchScheduleContext) (*matcher.MatchResult, error) {
 	if len(works) != 1 {
-		return nil, fmt.Errorf("Annict work is ambiguous (%d candidates)", len(works))
+		return nil, fmt.Errorf("annict work is ambiguous (%d candidates)", len(works))
 	}
 	work := works[0]
 	tid, err := strconv.Atoi(work.SyobocalTID)
 	if err != nil || tid <= 0 {
-		return nil, fmt.Errorf("Annict work %q has no valid Syobocal TID", work.Title)
+		return nil, fmt.Errorf("annict work %q has no valid Syobocal TID", work.Title)
 	}
 	if client == nil {
-		return nil, fmt.Errorf("Syobocal client is unavailable")
+		return nil, fmt.Errorf("syobocal client is unavailable")
 	}
 
 	programs, err := getSyobocalPrograms(c, client, tid, meta.RecordedDate)
@@ -653,7 +653,7 @@ func getSyobocalPrograms(c *cache.Cache, client syobocalProgramClient, tid int, 
 func observeScheduleAnchor(meta *parser.RecordingMetadata, result *matcher.MatchResult, c *cache.Cache, client syobocalProgramClient, batch *batchScheduleContext) (string, error) {
 	tid, err := strconv.Atoi(result.Work.SyobocalTID)
 	if err != nil || tid <= 0 {
-		return "", fmt.Errorf("Annict work %q has no valid Syobocal TID", result.Work.Title)
+		return "", fmt.Errorf("annict work %q has no valid Syobocal TID", result.Work.Title)
 	}
 	programs, err := getSyobocalPrograms(c, client, tid, meta.RecordedDate)
 	if err != nil {
