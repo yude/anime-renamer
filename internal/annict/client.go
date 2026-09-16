@@ -362,6 +362,8 @@ var titleSearchAliases = map[string][]string{
 	normalize.NormalizeTitleForMatch("アニメ・アオノハコ"):                           {"アオのハコ"},
 	normalize.NormalizeTitleForMatch("アークナイツ 黎明前奏"):                         {"アークナイツ【黎明前奏/PRELUDE TO DAWN】"},
 	normalize.NormalizeTitleForMatch("アワー 機動戦士ガンダム 鉄血のオルフェンズ"):              {"機動戦士ガンダム 鉄血のオルフェンズ"},
+	normalize.NormalizeTitleForMatch("アイドルマスター"):                            {"THE IDOLM@STER"},
+	normalize.NormalizeTitleForMatch("ラブライブ！"):                              {"ラブライブ！ School idol project"},
 }
 
 func punctuationAsSpaces(s string) string {

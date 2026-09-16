@@ -127,6 +127,12 @@ func NormalizeTitleForMatch(s string) string {
 	if key == "アニメアオノハコ" {
 		return NormalizeTitleForMatch("アオのハコ")
 	}
+	if key == "アイドルマスター" {
+		return NormalizeTitleForMatch("THE IDOLM@STER")
+	}
+	if key == "ラブライブ!" {
+		return NormalizeTitleForMatch("ラブライブ！ School idol project")
+	}
 	return key
 }
 

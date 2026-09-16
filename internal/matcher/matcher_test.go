@@ -426,6 +426,18 @@ func TestEpisodeNumberRejectsUnsupportedNumberTextWithoutSortFallback(t *testing
 	}
 }
 
+func TestEpisodeNumberUsesExplicitLabelForFractionalSpecial(t *testing.T) {
+	episode := &annict.Episode{Number: float64Ptr(10.5), NumberText: "第11話", SortNumber: 110}
+	if got, ok := EpisodeNumber(episode); !ok || got != 11 {
+		t.Errorf("EpisodeNumber() = %d, %v; want 11, true from explicit label", got, ok)
+	}
+
+	descriptive := &annict.Episode{Number: float64Ptr(10.5), NumberText: "OVA", SortNumber: 110}
+	if got, ok := EpisodeNumber(descriptive); ok || got != 0 {
+		t.Errorf("EpisodeNumber(descriptive) = %d, %v; want 0, false", got, ok)
+	}
+}
+
 func TestMatchMultipleWorksNarrowedByEpisodeSortNumber(t *testing.T) {
 	works := []annict.Work{
 		{ID: 1, Title: "作品A"},

@@ -93,6 +93,8 @@ func TestNormalizeTitleForMatch(t *testing.T) {
 		{a: "ポプテピピック[再]（リミックス版）", b: "ポプテピピック 再放送(リミックス版)", eq: true},
 		{a: "『Re：ゼロから始める異世界生活』第1期新編集版", b: "Re:ゼロから始める異世界生活 新編集版", eq: true},
 		{a: "アニメ・アオノハコ", b: "アオのハコ", eq: true},
+		{a: "アイドルマスター", b: "THE IDOLM@STER", eq: true},
+		{a: "ラブライブ！", b: "ラブライブ！ School idol project", eq: true},
 		{a: "けいおん！", b: "けいおん！！", eq: false},
 		{a: "作品 第2期", b: "作品 第3期", eq: false},
 	} {

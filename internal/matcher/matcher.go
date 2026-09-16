@@ -444,33 +444,37 @@ func EpisodeNumber(e *annict.Episode) (int, bool) {
 	if e.Number != nil {
 		number := *e.Number
 		if number <= 0 || math.Trunc(number) != number {
-			return 0, false
+			return episodeNumberFromText(e.NumberText)
 		}
 		integer := int(number)
 		if integer <= 0 || float64(integer) != number {
-			return 0, false
+			return episodeNumberFromText(e.NumberText)
 		}
 		return integer, true
 	}
 	if strings.TrimSpace(e.NumberText) != "" {
-		numberText := normalize.Normalize(strings.TrimSpace(e.NumberText))
-		if matches := episodeNumberTextPattern.FindStringSubmatch(numberText); matches != nil {
-			for _, digits := range matches[1:] {
-				if digits == "" {
-					continue
-				}
-				number, err := strconv.Atoi(digits)
-				return number, err == nil && number > 0
+		return episodeNumberFromText(e.NumberText)
+	}
+	return e.SortNumber, e.SortNumber > 0
+}
+
+func episodeNumberFromText(text string) (int, bool) {
+	numberText := normalize.Normalize(strings.TrimSpace(text))
+	if matches := episodeNumberTextPattern.FindStringSubmatch(numberText); matches != nil {
+		for _, digits := range matches[1:] {
+			if digits == "" {
+				continue
 			}
-			return 0, false
-		}
-		if matches := kanjiEpisodeNumberTextPattern.FindStringSubmatch(numberText); matches != nil {
-			number, ok := parser.ParseKanjiNumber(matches[1])
-			return number, ok && number > 0
+			number, err := strconv.Atoi(digits)
+			return number, err == nil && number > 0
 		}
 		return 0, false
 	}
-	return e.SortNumber, e.SortNumber > 0
+	if matches := kanjiEpisodeNumberTextPattern.FindStringSubmatch(numberText); matches != nil {
+		number, ok := parser.ParseKanjiNumber(matches[1])
+		return number, ok && number > 0
+	}
+	return 0, false
 }
 
 // episodeNumberMatches reports whether an episode's effective number (its
