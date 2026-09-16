@@ -37,6 +37,7 @@ var episodeNumberTextPattern = regexp.MustCompile(`(?i)^(?:第\s*([0-9]+)\s*(?:�
 var kanjiEpisodeNumberTextPattern = regexp.MustCompile(`^第\s*([〇一二三四五六七八九十百千壱弐参肆伍陸漆捌玖拾]+)\s*(?:話|幕|番|怪|夜|回|局|羽|R)$`)
 var subtitleSegmentOrdinalPrefix = regexp.MustCompile(`(?i)^(?:episode[0-9]+|其の[0-9一二三四五六七八九十]+)`)
 var subtitleEpisodeLabelPrefix = regexp.MustCompile(`(?i)^life[.\s]*(?:[0-9]+|max(?:imum)?)(?:\s*vs\s*power[.\s]*max(?:imum)?)?`)
+var spacedKatakanaReadingPattern = regexp.MustCompile(`([\p{L}\p{N}])[\s\x{3000}]+([（(][\p{Katakana}ー・･\s\x{3000}]{6,}[）)])`)
 
 // Season mapping from month to Annict season name. Each season is exactly
 // a 3-month cour: winter=Jan-Mar, spring=Apr-Jun, summer=Jul-Sep,
@@ -760,6 +761,14 @@ func subtitleBracketPartMatch(container, whole string) bool {
 // and integer episode number have already selected an episode. Candidate
 // selection continues to use the stricter subtitlesEquivalent key.
 func subtitleScoringKey(s string) string {
+	// Some metadata inserts a space before an otherwise ordinary katakana
+	// reading aid. Close only that narrow gap before the shared subtitle
+	// normalizer runs; parenthetical prose and kanji qualifiers stay intact.
+	s = spacedKatakanaReadingPattern.ReplaceAllString(s, `$1$2`)
+	// Recorder metadata alternates between the kanji and Arabic spelling of
+	// this common duration phrase. Keep this deliberately narrower than a
+	// general numeral conversion so semantic kanji elsewhere are preserved.
+	s = strings.ReplaceAll(s, "一日", "1日")
 	s = strings.NewReplacer("』『", "／", "」「", "／").Replace(s)
 	s = normalizeNumericJoinerDashes(s)
 	s = stripLatinDiacritics(normalize.NormalizeSubtitleForMatch(s))
@@ -770,7 +779,7 @@ func subtitleScoringKey(s string) string {
 			continue
 		}
 		switch r {
-		case '!', '?', '.', '~', '〜', '～', '…':
+		case '!', '?', '.', '。', '~', '〜', '～', '…', '♡', '♥':
 			continue
 		case '&', '＆', '／':
 			r = '/'
@@ -778,6 +787,10 @@ func subtitleScoringKey(s string) string {
 			// These historical forms of the same name character are both in
 			// active metadata sources but are not folded by Unicode NFKC.
 			r = '宝'
+		case '貳', '貮':
+			r = '弐'
+		case '〇', '◯':
+			r = '○'
 		}
 		b.WriteRune(r)
 	}

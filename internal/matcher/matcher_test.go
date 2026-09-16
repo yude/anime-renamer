@@ -663,12 +663,33 @@ func TestMatchSubtitlePresentationVariantsReachThreshold(t *testing.T) {
 		{annict: "寳月詠子", file: "寶月詠子"},
 		{annict: "素人《ビギナー》", file: "素人≪ビギナー≫"},
 		{annict: "『確率機』『シングル二倍』『夢芝居』", file: "確率機／シングル二倍／夢芝居"},
+		{annict: "友 (ダフネ・ラウロス)", file: "友(ダフネ・ラウロス)"},
+		{annict: "ラリーしたいです", file: "ラリーしたいです。"},
+		{annict: "てんこもり♡文化祭", file: "てんこもり文化祭"},
+		{annict: "センパイ君♡", file: "センパイ君♥"},
+		{annict: "するがモンキー 其ノ貮", file: "するがモンキー 其ノ貳"},
+		{annict: "夢にまでみた？フジ◯◯", file: "夢にまでみた？フジ〇〇"},
+		{annict: "なんでもない一日", file: "なんでもない１日"},
 	} {
 		episodes := map[int][]annict.Episode{1: {{ID: 100 + i, Number: float64Ptr(1), Title: tt.annict}}}
 		meta := &parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 1, Subtitle: tt.file}
 		result := Match(meta, works, episodes, nil)
 		if result == nil || result.Confidence < AutoRenameThreshold {
 			t.Errorf("Match(%q, %q) = %+v, want confidence >= %d", tt.annict, tt.file, result, AutoRenameThreshold)
+		}
+	}
+}
+
+func TestSubtitlePresentationScoringKeepsMeaningfulParentheticalText(t *testing.T) {
+	for _, tt := range []struct {
+		a, b string
+	}{
+		{a: "決戦 (前編)", b: "決戦"},
+		{a: "決戦 (つづく)", b: "決戦"},
+		{a: "作品 (リメイク)", b: "作品"},
+	} {
+		if subtitlesEquivalentForScoring(tt.a, tt.b) {
+			t.Errorf("subtitlesEquivalentForScoring(%q, %q) = true, want false", tt.a, tt.b)
 		}
 	}
 }
