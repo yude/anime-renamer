@@ -8,9 +8,15 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/yude/anime-renamer/internal/matcher"
 )
+
+// Portable filesystems commonly limit one path component to 255 bytes. Keep
+// generated recording names within that boundary; in particular, some Annict
+// episode titles are substantially longer than the source recording name.
+const maxFilenameBytes = 255
 
 // pathSanitizer replaces characters that are illegal in file or directory
 // names on Windows, macOS, and/or Linux with visually similar full-width
@@ -121,15 +127,57 @@ func BuildPath(originalPath string, result *matcher.MatchResult) (string, error)
 		ext = ".mp4"
 	}
 
-	// Format filename: <WorkTitle> #<N> 「<Subtitle>」<original extension>
-	var filename string
-	if subtitle != "" {
-		filename = fmt.Sprintf("%s #%d 「%s」%s", workTitle, epNum, subtitle, ext)
-	} else {
-		filename = fmt.Sprintf("%s #%d%s", workTitle, epNum, ext)
+	filename, err := buildFilename(workTitle, epNum, subtitle, ext)
+	if err != nil {
+		return "", err
 	}
 
 	return filepath.Join(workDir, filename), nil
+}
+
+// buildFilename formats a recording name while preserving the identifying
+// work title, episode number, and extension. When the official subtitle would
+// exceed the per-component filesystem limit, only that subtitle is shortened.
+func buildFilename(workTitle string, episode int, subtitle, ext string) (string, error) {
+	if subtitle != "" {
+		prefix := fmt.Sprintf("%s #%d 「", workTitle, episode)
+		suffix := "」" + ext
+		remaining := maxFilenameBytes - len(prefix) - len(suffix)
+		if remaining > 0 {
+			subtitle = truncateUTF8WithEllipsis(subtitle, remaining)
+			filename := prefix + subtitle + suffix
+			if subtitle != "" && len(filename) <= maxFilenameBytes {
+				return filename, nil
+			}
+		}
+	}
+
+	suffix := fmt.Sprintf(" #%d%s", episode, ext)
+	remaining := maxFilenameBytes - len(suffix)
+	if remaining <= 0 {
+		return "", fmt.Errorf("episode and extension exceed filename limit")
+	}
+	return truncateUTF8WithEllipsis(workTitle, remaining) + suffix, nil
+}
+
+func truncateUTF8WithEllipsis(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	const ellipsis = "…"
+	if maxBytes < len(ellipsis) {
+		return ""
+	}
+	limit := maxBytes - len(ellipsis)
+	end := 0
+	for end < len(s) {
+		_, size := utf8.DecodeRuneInString(s[end:])
+		if end+size > limit {
+			break
+		}
+		end += size
+	}
+	return strings.TrimRightFunc(s[:end], unicode.IsSpace) + ellipsis
 }
 
 // BuildDestinationPath applies the optional output root to BuildPath without

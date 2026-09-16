@@ -4,7 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/yude/anime-renamer/internal/annict"
 	"github.com/yude/anime-renamer/internal/matcher"
@@ -164,6 +166,27 @@ func TestBuildPath(t *testing.T) {
 				t.Errorf("BuildPath() = %q, want %q", got, tt.wantPath)
 			}
 		})
+	}
+}
+
+func TestBuildPathTruncatesLongSubtitleAtUTF8Boundary(t *testing.T) {
+	result := &matcher.MatchResult{
+		Work:    &annict.Work{ID: 1, Title: "神無き世界のカミサマ活動"},
+		Episode: &annict.Episode{ID: 1, Number: float64Ptr(1), Title: strings.Repeat("とても長い公式字幕 ", 30)},
+	}
+	got, err := BuildPath("/recordings/source.mp4", result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := filepath.Base(got)
+	if len(name) > maxFilenameBytes {
+		t.Fatalf("generated filename is %d bytes, want <= %d: %q", len(name), maxFilenameBytes, name)
+	}
+	if !utf8.ValidString(name) {
+		t.Fatalf("generated filename is not valid UTF-8: %q", name)
+	}
+	if !strings.HasPrefix(name, "神無き世界のカミサマ活動 #1 「") || !strings.HasSuffix(name, "…」.mp4") {
+		t.Fatalf("generated filename did not preserve identity and extension: %q", name)
 	}
 }
 
