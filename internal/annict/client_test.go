@@ -52,6 +52,17 @@ func TestSearchTitleVariants(t *testing.T) {
 		{input: "うたの☆プリンスさまっ♪ マジLOVE1000%", want: "うたの☆プリンスさまっ♪"},
 		{input: "タイムボカンシリーズ ヤッターマン", want: "ヤッターマン"},
 		{input: "オーイ！とんぼ", want: "オーイ! とんぼ"},
+		{input: "アニメ「暗殺教室」第1期", want: "暗殺教室"},
+		{input: "新春スペシャル スキップとローファー", want: "スキップとローファー"},
+		{input: "『デカダンス』年始全話一挙放送", want: "デカダンス"},
+		{input: "ラブライブ！サンシャイン！！TVアニメ2期", want: "ラブライブ！サンシャイン!! (第2期)"},
+		{input: "理系が恋に落ちたので証明してみた。r ＝1 －sin θ（ハート）", want: "理系が恋に落ちたので証明してみた。r=1-sinθ"},
+		{input: "アワー 機動戦士Gundam GQuuuuuuX(ジークアクス)", want: "機動戦士Gundam GQuuuuuuX"},
+		{input: "〈物語〉シリーズセレクション 続・終物語", want: "続・終物語"},
+		{input: "ヴァイスシュヴァルツ劇場 アニメ Ｃｈａｒｌｏｔｔｅ", want: "Charlotte"},
+		{input: "放送開始10周年 魔法少女まどか☆マギカ", want: "魔法少女まどか☆マギカ"},
+		{input: "ポプテピピック[再]（リミックス版）", want: "ポプテピピック 再放送(リミックス版)"},
+		{input: "アークナイツ 黎明前奏", want: "アークナイツ【黎明前奏/PRELUDE TO DAWN】"},
 	} {
 		if got := searchTitleVariants(tt.input); !slices.Contains(got, tt.want) {
 			t.Errorf("searchTitleVariants(%q) = %q, want variant %q", tt.input, got, tt.want)

@@ -337,13 +337,31 @@ func searchTitleVariants(title string) []string {
 }
 
 var titleSearchAliases = map[string][]string{
-	normalize.NormalizeTitleForMatch("シュタインズ・ゲート ゼロ"):                {"STEINS;GATE 0"},
-	normalize.NormalizeTitleForMatch("ポプテピピック TVアニメーション作品第二シリーズ"):    {"ポプテピピック 第二シリーズ"},
-	normalize.NormalizeTitleForMatch("「1分間だけ触れてもいいよ…」シェアハウスの秘密ルール。"): {"1分間だけ触れてもいいよ"},
-	normalize.NormalizeTitleForMatch("うたの☆プリンスさまっ♪ マジLOVE1000%"):     {"うたの☆プリンスさまっ♪"},
-	normalize.NormalizeTitleForMatch("ＯｖｅｒＤｒｉｖｅ"):                    {"Over Drive"},
-	normalize.NormalizeTitleForMatch("タイムボカンシリーズ ヤッターマン"):            {"ヤッターマン"},
-	normalize.NormalizeTitleForMatch("オーイ！とんぼ"):                      {"オーイ! とんぼ"},
+	normalize.NormalizeTitleForMatch("シュタインズ・ゲート ゼロ"):                       {"STEINS;GATE 0"},
+	normalize.NormalizeTitleForMatch("ポプテピピック TVアニメーション作品第二シリーズ"):           {"ポプテピピック 第二シリーズ"},
+	normalize.NormalizeTitleForMatch("「1分間だけ触れてもいいよ…」シェアハウスの秘密ルール。"):        {"1分間だけ触れてもいいよ"},
+	normalize.NormalizeTitleForMatch("うたの☆プリンスさまっ♪ マジLOVE1000%"):            {"うたの☆プリンスさまっ♪"},
+	normalize.NormalizeTitleForMatch("ＯｖｅｒＤｒｉｖｅ"):                           {"Over Drive"},
+	normalize.NormalizeTitleForMatch("タイムボカンシリーズ ヤッターマン"):                   {"ヤッターマン"},
+	normalize.NormalizeTitleForMatch("オーイ！とんぼ"):                             {"オーイ! とんぼ"},
+	normalize.NormalizeTitleForMatch("アニメ「暗殺教室」第1期"):                        {"暗殺教室"},
+	normalize.NormalizeTitleForMatch("新春スペシャル スキップとローファー"):                  {"スキップとローファー"},
+	normalize.NormalizeTitleForMatch("『デカダンス』年始全話一挙放送"):                     {"デカダンス"},
+	normalize.NormalizeTitleForMatch("ラブライブ！サンシャイン！！TVアニメ2期"):               {"ラブライブ！サンシャイン!! (第2期)"},
+	normalize.NormalizeTitleForMatch("理系が恋に落ちたので証明してみた。r ＝1 －sin θ（ハート）"):   {"理系が恋に落ちたので証明してみた。r=1-sinθ"},
+	normalize.NormalizeTitleForMatch("アワー 機動戦士Gundam GQuuuuuuX(ジークアクス)"):    {"機動戦士Gundam GQuuuuuuX"},
+	normalize.NormalizeTitleForMatch("〈物語〉シリーズセレクション 続・終物語"):                {"続・終物語"},
+	normalize.NormalizeTitleForMatch("〈物語〉シリーズセレクション「暦物語」"):                 {"暦物語"},
+	normalize.NormalizeTitleForMatch("ヴァイスシュヴァルツ劇場 アニメ Ｃｈａｒｌｏｔｔｅ"):          {"Charlotte"},
+	normalize.NormalizeTitleForMatch("ヴァイスシュヴァルツ劇場 アニメ グリザイアの果実"):           {"グリザイアの果実"},
+	normalize.NormalizeTitleForMatch("放送開始10周年 魔法少女まどか☆マギカ"):                {"魔法少女まどか☆マギカ"},
+	normalize.NormalizeTitleForMatch("ポプテピピック[再]（リミックス版）"):                  {"ポプテピピック 再放送(リミックス版)"},
+	normalize.NormalizeTitleForMatch("魔法少女まどか☆マギカ【始まりの物語／永遠の物語】TV Edition"): {"魔法少女まどか☆マギカ 始まりの物語／永遠の物語 TV Edition"},
+	normalize.NormalizeTitleForMatch("『Re：ゼロから始める異世界生活』第1期新編集版"):            {"Re:ゼロから始める異世界生活 新編集版"},
+	normalize.NormalizeTitleForMatch("ご注文はうさぎですか？BLOOM"):                    {"ご注文はうさぎですか？ BLOOM"},
+	normalize.NormalizeTitleForMatch("アニメ・アオノハコ"):                           {"アオのハコ"},
+	normalize.NormalizeTitleForMatch("アークナイツ 黎明前奏"):                         {"アークナイツ【黎明前奏/PRELUDE TO DAWN】"},
+	normalize.NormalizeTitleForMatch("アワー 機動戦士ガンダム 鉄血のオルフェンズ"):              {"機動戦士ガンダム 鉄血のオルフェンズ"},
 }
 
 func punctuationAsSpaces(s string) string {

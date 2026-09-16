@@ -111,6 +111,21 @@ func NormalizeTitleForMatch(s string) string {
 	if key == "ヴアニタスの手記カルテ" {
 		return "ヴアニタスの手記"
 	}
+	if key == "ラブライブ!サンシャイン!!tvアニメ2期" {
+		return NormalizeTitleForMatch("ラブライブ！サンシャイン!! (第2期)")
+	}
+	if key == "理系が恋に落ちたので証明してみた。r=1sinθハート" {
+		return NormalizeTitleForMatch("理系が恋に落ちたので証明してみた。r=1-sinθ")
+	}
+	if key == "ポプテピピック再リミックス版" {
+		return NormalizeTitleForMatch("ポプテピピック 再放送(リミックス版)")
+	}
+	if key == "reゼロから始める異世界生活1期新編集版" {
+		return NormalizeTitleForMatch("Re:ゼロから始める異世界生活 新編集版")
+	}
+	if key == "アニメアオノハコ" {
+		return NormalizeTitleForMatch("アオのハコ")
+	}
 	return key
 }
 
