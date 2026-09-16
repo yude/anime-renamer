@@ -735,12 +735,76 @@ func TestMatchStructuredSubtitlePartsReachThreshold(t *testing.T) {
 		{annict: "Hello Strange(そして伝説へ……)／What A Wonderful World(この素晴らしい異世界生活にようこそ)／As(あの場所で集まろう)／Mean Old World(昔の話よ…)", file: "Hello Strange(そして伝説へ……)、What A Wonderful World(この素晴らしい異世界生活にようこそ)、As(あの場所で集まろう)、Mean Old World(昔の話よ…)"},
 		{annict: "其の一 彼女には向かない職業／其の二 有頂天探偵社", file: "彼女には向かない職業"},
 		{annict: "「とのさまんの特別/とのさまんの最後」/「フロ騒動/クマ！」/「晴れの日の面々/コンビニ弁当からの……」", file: "Episode04 とのさまんの特別／とのさまんの最後 ／ Episode05 フロ騒動／クマ！ ／ Episode06 晴れの日の面々／コンビニ弁当からの…"},
+		{annict: "それはいつかの日のこと、なので / そしてある日のこと、なので", file: "Ａ：それはいつかの日のこと、なので"},
 	} {
 		episodes := map[int][]annict.Episode{1: {{ID: 200 + i, Number: float64Ptr(1), Title: tt.annict}}}
 		meta := &parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 1, Subtitle: tt.file}
 		result := Match(meta, works, episodes, nil)
 		if result == nil || result.Confidence < AutoRenameThreshold {
 			t.Errorf("Match(%q, %q) = %+v, want confidence >= %d (segments: %q vs %q)", tt.annict, tt.file, result, AutoRenameThreshold, subtitleSegments(tt.annict), subtitleSegments(tt.file))
+		}
+	}
+}
+
+func TestMatchExplicitOtherEpisodeSummariesReachThreshold(t *testing.T) {
+	works := []annict.Work{{ID: 1, Title: "作品"}}
+	for i, tt := range []struct {
+		annict string
+		file   string
+	}{
+		{annict: "吸血鬼ちゃんと球技祭／吸血鬼ちゃんと部活探訪", file: "吸血鬼ちゃんと球技祭 ほか"},
+		{annict: "ホームレス女騎士/はじめてのおしごと他", file: "ホームレス女騎士／ホームレス女騎士アフター／はじめてのおしごと"},
+		{annict: "救世主女騎士他", file: "ホームレスのグルメ／救世主女騎士"},
+		{annict: "退治人(ハンター)来たりて空を飛ぶ 前編", file: "『退治人（ハンター）来たりて空を跳ぶ 前編』ほか２本"},
+	} {
+		episodes := map[int][]annict.Episode{1: {{ID: 500 + i, Number: float64Ptr(1), Title: tt.annict}}}
+		meta := &parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 1, Subtitle: tt.file}
+		result := Match(meta, works, episodes, nil)
+		if result == nil || result.Confidence < AutoRenameThreshold {
+			t.Errorf("Match(%q, %q) = %+v, want confidence >= %d", tt.annict, tt.file, result, AutoRenameThreshold)
+		}
+	}
+}
+
+func TestOtherEpisodeSummaryRejectsShortOrMeaningfullyDifferentSegments(t *testing.T) {
+	for _, tt := range []struct {
+		summary string
+		full    string
+	}{
+		{summary: "歩ほか", full: "歩／バシ"},
+		{summary: "決戦（前編）ほか", full: "決戦（後編）／帰還"},
+		{summary: "これは十分に長い前編ほか", full: "これはまったく違う後編／帰還"},
+	} {
+		if subtitleOtherSummaryMatch(tt.summary, tt.full) {
+			t.Errorf("subtitleOtherSummaryMatch(%q, %q) = true, want false", tt.summary, tt.full)
+		}
+	}
+}
+
+func TestMatchLongParentheticalExpansionReachThreshold(t *testing.T) {
+	for i, tt := range []struct {
+		annict string
+		file   string
+	}{
+		{annict: "劇団ドラゴン、オンステージ！(劇団名あったんですね)", file: "劇団ドラゴン、オンステージ！"},
+		{annict: "柏田さんと太田君とプール", file: "柏田さんと太田君とプール(柏田さんと太田君と水泳／田淵さんの秘密／太田君のお昼)"},
+	} {
+		result := Match(
+			&parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 1, Subtitle: tt.file},
+			[]annict.Work{{ID: 1, Title: "作品"}},
+			map[int][]annict.Episode{1: {{ID: 600 + i, Number: float64Ptr(1), Title: tt.annict}}},
+			nil,
+		)
+		if result == nil || result.Confidence < AutoRenameThreshold {
+			t.Errorf("Match(%q, %q) = %+v, want confidence >= %d", tt.annict, tt.file, result, AutoRenameThreshold)
+		}
+	}
+}
+
+func TestLongParentheticalExpansionRejectsShortQualifiers(t *testing.T) {
+	for _, qualifier := range []string{"前編", "後編", "完結"} {
+		if subtitleLongParentheticalExpansionMatch("これは十分に長い本編タイトル", "これは十分に長い本編タイトル（"+qualifier+"）") {
+			t.Errorf("subtitleLongParentheticalExpansionMatch accepted short qualifier %q", qualifier)
 		}
 	}
 }

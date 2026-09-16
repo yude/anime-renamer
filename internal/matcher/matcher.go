@@ -35,9 +35,10 @@ var seriesContinuationPattern = regexp.MustCompile(`^(?:第?[0-9]+(?:期|クー�
 
 var episodeNumberTextPattern = regexp.MustCompile(`(?i)^(?:第\s*([0-9]+)\s*(?:話|幕|番|怪|夜|回|局|羽|R)|#\s*([0-9]+)|episode[.\s]*([0-9]+)|sailing\s*([0-9]+)|([0-9]+))$`)
 var kanjiEpisodeNumberTextPattern = regexp.MustCompile(`^第\s*([〇一二三四五六七八九十百千壱弐参肆伍陸漆捌玖拾]+)\s*(?:話|幕|番|怪|夜|回|局|羽|R)$`)
-var subtitleSegmentOrdinalPrefix = regexp.MustCompile(`(?i)^(?:episode[0-9]+|其の[0-9一二三四五六七八九十]+)`)
+var subtitleSegmentOrdinalPrefix = regexp.MustCompile(`(?i)^(?:episode[0-9]+|其の[0-9一二三四五六七八九十]+|[a-z]:)`)
 var subtitleEpisodeLabelPrefix = regexp.MustCompile(`(?i)^life[.\s]*(?:[0-9]+|max(?:imum)?)(?:\s*vs\s*power[.\s]*max(?:imum)?)?`)
 var spacedKatakanaReadingPattern = regexp.MustCompile(`([\p{L}\p{N}])[\s\x{3000}]+([（(][\p{Katakana}ー・･\s\x{3000}]{6,}[）)])`)
+var subtitleOtherSummarySuffix = regexp.MustCompile(`[\s\x{3000}]*(?:ほか|他)(?:[\s\x{3000}]*[0-9０-９〇一二三四五六七八九十]+[\s\x{3000}]*本)?[\s\x{3000}]*$`)
 
 // Season mapping from month to Annict season name. Each season is exactly
 // a 3-month cour: winter=Jan-Mar, spring=Apr-Jun, summer=Jul-Sep,
@@ -678,7 +679,98 @@ func subtitleStructuredPartMatch(a, b string) bool {
 	if subtitleSegmentSequenceMatch(a, b) || subtitleSegmentSequenceMatch(b, a) {
 		return true
 	}
+	if subtitleOtherSummaryMatch(a, b) || subtitleOtherSummaryMatch(b, a) {
+		return true
+	}
+	if subtitleLongParentheticalExpansionMatch(a, b) || subtitleLongParentheticalExpansionMatch(b, a) {
+		return true
+	}
 	return subtitleBracketPartMatch(a, b) || subtitleBracketPartMatch(b, a)
+}
+
+// subtitleOtherSummaryMatch recognizes the explicit EPG convention where a
+// title lists one or more segments and ends in "ほか", "他", or "ほかN本".
+// The listed segments must occur in order in the complete title. A single
+// long one-rune discrepancy is tolerated because recorder and Annict metadata
+// occasionally differ in one glyph, but short or substantially different
+// qualifiers remain distinct.
+func subtitleOtherSummaryMatch(summary, full string) bool {
+	marker := subtitleOtherSummarySuffix.FindStringIndex(summary)
+	if marker == nil || marker[0] == 0 {
+		return false
+	}
+	summarySegments := subtitleSegments(strings.TrimSpace(summary[:marker[0]]))
+	fullSegments := subtitleSegments(full)
+	if len(summarySegments) == 0 || len(summarySegments) > len(fullSegments) {
+		return false
+	}
+
+	next := 0
+	for _, want := range summarySegments {
+		if utf8.RuneCountInString(want) < 3 {
+			return false
+		}
+		found := false
+		for next < len(fullSegments) {
+			candidate := fullSegments[next]
+			next++
+			if want == candidate || oneRuneSubstitutionApart(want, candidate) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func oneRuneSubstitutionApart(a, b string) bool {
+	ar, br := []rune(a), []rune(b)
+	if len(ar) != len(br) || len(ar) < 10 {
+		return false
+	}
+	differences := 0
+	for i := range ar {
+		if ar[i] != br[i] {
+			differences++
+			if differences > 1 {
+				return false
+			}
+		}
+	}
+	return differences == 1
+}
+
+// subtitleLongParentheticalExpansionMatch accepts a long exact main title
+// with a long parenthetical expansion appended by only one metadata source.
+// Length guards keep short semantic qualifiers such as 前編 and 後編 distinct.
+func subtitleLongParentheticalExpansionMatch(base, expanded string) bool {
+	runes := []rune(strings.TrimSpace(expanded))
+	for i, open := range runes {
+		close := rune(0)
+		switch open {
+		case '(':
+			close = ')'
+		case '（':
+			close = '）'
+		default:
+			continue
+		}
+		if len(runes) == 0 || runes[len(runes)-1] != close {
+			continue
+		}
+		baseKey := subtitleScoringKey(base)
+		prefixKey := subtitleScoringKey(string(runes[:i]))
+		expansionKey := subtitleScoringKey(string(runes[i+1 : len(runes)-1]))
+		if baseKey != "" && baseKey == prefixKey &&
+			utf8.RuneCountInString(baseKey) >= 8 &&
+			utf8.RuneCountInString(expansionKey) >= 8 {
+			return true
+		}
+	}
+	return false
 }
 
 // subtitleSegmentSequenceMatch reports whether every slash/ampersand-delimited
