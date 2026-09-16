@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/yude/anime-renamer/internal/annict"
 	"github.com/yude/anime-renamer/internal/cache"
 	"github.com/yude/anime-renamer/internal/matcher"
+	"github.com/yude/anime-renamer/internal/normalize"
 	"github.com/yude/anime-renamer/internal/parser"
 	"github.com/yude/anime-renamer/internal/renamer"
 	"github.com/yude/anime-renamer/internal/syobocal"
@@ -713,7 +715,7 @@ func TestProcessFileResolvesDateOnlyFromUniqueSyobocalSchedule(t *testing.T) {
 		false,
 		matcher.AutoRenameThreshold,
 		"",
-		syobocal.NewClientWithBaseURL(syobocalServer.URL),
+		&processingContext{syobocalClient: syobocal.NewClientWithBaseURL(syobocalServer.URL)},
 	)
 	if result.Error != nil || result.SkipReason != "" || !result.Previewed || result.EpisodeNum != 2 {
 		t.Fatalf("processFile() = %+v, want date-only episode 2 preview", result)
@@ -748,7 +750,7 @@ func TestProcessFileDateOnlyScheduleAmbiguityIsSafeSkip(t *testing.T) {
 		false,
 		matcher.AutoRenameThreshold,
 		"",
-		syobocal.NewClientWithBaseURL(syobocalServer.URL),
+		&processingContext{syobocalClient: syobocal.NewClientWithBaseURL(syobocalServer.URL)},
 	)
 	if result.Error != nil || result.SkipReason == "" || result.Previewed || !strings.Contains(result.SkipReason, "ambiguous") {
 		t.Fatalf("processFile() = %+v, want ambiguous date-only safe skip", result)
@@ -778,6 +780,106 @@ func TestRefreshWorkMetadataUpgradesPreSyobocalCacheEntry(t *testing.T) {
 	}
 	if cached, ok := c.GetWork("作品"); !ok || cached.SyobocalTID != "6373" {
 		t.Fatalf("refreshed work was not persisted: %+v, %v", cached, ok)
+	}
+}
+
+func TestProcessFileUsesTwoBatchAnchorsForAmbiguousDate(t *testing.T) {
+	annictServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		episodes := make([]string, 8)
+		for i := range episodes {
+			number := i + 1
+			episodes[i] = fmt.Sprintf(`{"node":{"annictId":%d,"number":%d,"sortNumber":%d,"title":""}}`, 100+number, number, number)
+		}
+		fmt.Fprintf(w, `{"data":{"searchWorks":{"edges":[{"node":{"annictId":1,"title":"作品","syobocalTid":6373,"episodesCount":8,"episodes":{"edges":[%s]}}}]}}}`, strings.Join(episodes, ","))
+	}))
+	defer annictServer.Close()
+
+	syobocalServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		counts := map[string][2]int{
+			"20220814_000000-20220815_000000": {6, 5},
+			"20220821_000000-20220822_000000": {7, 6},
+			"20220828_000000-20220829_000000": {8, 7},
+		}
+		pair, ok := counts[r.URL.Query().Get("Range")]
+		if !ok {
+			t.Fatalf("unexpected Range %q", r.URL.Query().Get("Range"))
+		}
+		date := r.URL.Query().Get("Range")[:8]
+		formatted := date[:4] + "-" + date[4:6] + "-" + date[6:]
+		fmt.Fprintf(w, `<ProgLookupResponse><ProgItems><ProgItem><PID>1</PID><TID>6373</TID><StTime>%s 02:00:00</StTime><EdTime>%s 02:30:00</EdTime><Count>%d</Count><ChID>16</ChID></ProgItem><ProgItem><PID>2</PID><TID>6373</TID><StTime>%s 02:42:00</StTime><EdTime>%s 03:12:00</EdTime><Count>%d</Count><ChID>79</ChID></ProgItem></ProgItems><Result><Code>200</Code></Result></ProgLookupResponse>`, formatted, formatted, pair[0], formatted, formatted, pair[1])
+	}))
+	defer syobocalServer.Close()
+
+	dir := t.TempDir()
+	files := []string{
+		filepath.Join(dir, "作品 第6話 (20220814).mp4"),
+		filepath.Join(dir, "作品 第7話 (20220821).mp4"),
+		filepath.Join(dir, "作品 (20220828).mp4"),
+	}
+	for _, file := range files {
+		if err := os.WriteFile(file, []byte("recording"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	batch := newBatchScheduleContext()
+	batch.targetTitles[normalize.NormalizeTitleForMatch("作品")] = true
+	processing := &processingContext{
+		syobocalClient: syobocal.NewClientWithBaseURL(syobocalServer.URL),
+		batchSchedule:  batch,
+	}
+	client := annict.NewClientWithURLs("token", annictServer.URL, annictServer.URL)
+	c := cache.NewDisabled(filepath.Join(dir, "cache"))
+	workCache := make(map[string][]annict.Work)
+	episodesCache := make(map[int][]annict.Episode)
+	programsCache := make(map[programsCacheKey][]annict.Program)
+	plans := make(map[string]string)
+	for _, file := range files[:2] {
+		result := processFile(file, client, c, workCache, episodesCache, programsCache, plans, true, false, matcher.AutoRenameThreshold, "", processing)
+		if result.Error != nil || result.SkipReason != "" || !result.Previewed {
+			t.Fatalf("anchor processFile(%q) = %+v", file, result)
+		}
+	}
+	if channelID, anchors, ok := batch.trustedChannel(1); !ok || channelID != 16 || anchors != 2 {
+		t.Fatalf("trustedChannel() = %d, %d, %v; want 16, 2, true", channelID, anchors, ok)
+	}
+	result := processFile(files[2], client, c, workCache, episodesCache, programsCache, plans, true, false, matcher.AutoRenameThreshold, "", processing)
+	if result.Error != nil || result.SkipReason != "" || !result.Previewed || result.EpisodeNum != 8 {
+		t.Fatalf("date-only processFile() = %+v, want episode 8 from trusted channel", result)
+	}
+}
+
+func TestBatchScheduleContextRejectsConflictingOrDuplicateAnchors(t *testing.T) {
+	batch := newBatchScheduleContext()
+	batch.record(1, 16, "2022-08-14:6")
+	batch.record(1, 16, "2022-08-14:6")
+	if _, anchors, ok := batch.trustedChannel(1); ok || anchors != 0 {
+		t.Fatalf("duplicate anchor unexpectedly trusted: anchors=%d ok=%v", anchors, ok)
+	}
+	batch.record(1, 16, "2022-08-21:7")
+	if channel, anchors, ok := batch.trustedChannel(1); !ok || channel != 16 || anchors != 2 {
+		t.Fatalf("two anchors not trusted: channel=%d anchors=%d ok=%v", channel, anchors, ok)
+	}
+	batch.record(1, 79, "2022-08-28:7")
+	if _, _, ok := batch.trustedChannel(1); ok {
+		t.Fatal("conflicting channel anchors unexpectedly trusted")
+	}
+}
+
+func TestPrioritizeDateOnlyFiles(t *testing.T) {
+	files := []string{
+		"/recordings/作品 (20220828).mp4",
+		"/recordings/作品 第7話 (20220821).mp4",
+		"/recordings/作品 総集編 (20220822).mp4",
+	}
+	ordered, batch := prioritizeDateOnlyFiles(files)
+	want := []string{files[1], files[2], files[0]}
+	if !slices.Equal(ordered, want) {
+		t.Fatalf("prioritizeDateOnlyFiles() = %v, want %v", ordered, want)
+	}
+	if !batch.wantsAnchors("作品") {
+		t.Fatal("date-only work title was not registered for anchors")
 	}
 }
 

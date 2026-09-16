@@ -67,3 +67,42 @@ func TestResolveUniqueFailsClosed(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveForChannelDisambiguatesDifferentCounts(t *testing.T) {
+	jst := time.FixedZone("JST", 9*60*60)
+	date := time.Date(2022, 8, 28, 0, 0, 0, 0, jst)
+	episodes := []annict.Episode{
+		{ID: 107, Number: number(7), Title: "七"},
+		{ID: 108, Number: number(8), Title: "八"},
+	}
+	programs := []syobocal.Program{
+		{PID: 1, Count: 8, ChannelID: 16, StartedAt: date.Add(2 * time.Hour)},
+		{PID: 2, Count: 7, ChannelID: 79, StartedAt: date.Add(3 * time.Hour)},
+	}
+	if episode, _ := ResolveUnique(date, episodes, programs); episode != nil {
+		t.Fatalf("ResolveUnique() = %+v, want ambiguous nil", episode)
+	}
+	episode, reason := ResolveForChannel(date, episodes, programs, 16)
+	if episode == nil || episode.ID != 108 || !strings.Contains(reason, "trusted channel 16") {
+		t.Fatalf("ResolveForChannel() = %+v, %q; want episode 108", episode, reason)
+	}
+}
+
+func TestAnchorChannel(t *testing.T) {
+	jst := time.FixedZone("JST", 9*60*60)
+	date := time.Date(2022, 8, 21, 0, 0, 0, 0, jst)
+	episode := &annict.Episode{ID: 107, Number: number(7), Title: "七"}
+	programs := []syobocal.Program{
+		{PID: 1, Count: 7, ChannelID: 16, StartedAt: date.Add(2 * time.Hour), Subtitle: "七"},
+		{PID: 2, Count: 6, ChannelID: 79, StartedAt: date.Add(3 * time.Hour), Subtitle: "六"},
+	}
+	channelID, reason := AnchorChannel(date, episode, programs)
+	if channelID != 16 || !strings.Contains(reason, "fingerprints channel 16") {
+		t.Fatalf("AnchorChannel() = %d, %q; want channel 16", channelID, reason)
+	}
+
+	programs = append(programs, syobocal.Program{PID: 3, Count: 7, ChannelID: 99, StartedAt: date.Add(4 * time.Hour), Subtitle: "七"})
+	if channelID, _ := AnchorChannel(date, episode, programs); channelID != 0 {
+		t.Fatalf("AnchorChannel() = %d, want ambiguous zero", channelID)
+	}
+}

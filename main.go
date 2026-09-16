@@ -90,6 +90,7 @@ func main() {
 	if len(files) == 0 {
 		log.Fatal("no files found to process")
 	}
+	files, batchSchedule := prioritizeDateOnlyFiles(files)
 
 	fmt.Fprintf(os.Stderr, "Found %d file(s) to process\n\n", len(files))
 
@@ -98,6 +99,7 @@ func main() {
 	episodesCache := make(map[int][]annict.Episode)
 	programsCache := make(map[programsCacheKey][]annict.Program)
 	plannedDestinations := make(map[string]string)
+	processing := &processingContext{syobocalClient: syobocalClient, batchSchedule: batchSchedule}
 
 	renamed := 0
 	previewed := 0
@@ -105,7 +107,7 @@ func main() {
 	failed := 0
 
 	for _, file := range files {
-		result := processFile(file, annictClient, c, workCache, episodesCache, programsCache, plannedDestinations, *dryRun, *verbose, *confidenceThreshold, *outputDir, syobocalClient)
+		result := processFile(file, annictClient, c, workCache, episodesCache, programsCache, plannedDestinations, *dryRun, *verbose, *confidenceThreshold, *outputDir, processing)
 
 		switch {
 		case result.Error != nil:
@@ -150,6 +152,71 @@ type syobocalProgramClient interface {
 	GetPrograms(tid int, date time.Time) ([]syobocal.Program, error)
 }
 
+type processingContext struct {
+	syobocalClient syobocalProgramClient
+	batchSchedule  *batchScheduleContext
+}
+
+type channelAnchorState struct {
+	channelID int
+	keys      map[string]bool
+	conflict  bool
+}
+
+type batchScheduleContext struct {
+	targetTitles map[string]bool
+	anchors      map[int]*channelAnchorState
+}
+
+func newBatchScheduleContext() *batchScheduleContext {
+	return &batchScheduleContext{
+		targetTitles: make(map[string]bool),
+		anchors:      make(map[int]*channelAnchorState),
+	}
+}
+
+func (b *batchScheduleContext) wantsAnchors(titles ...string) bool {
+	if b == nil {
+		return false
+	}
+	for _, title := range titles {
+		if b.targetTitles[normalize.NormalizeTitleForMatch(title)] {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *batchScheduleContext) record(workID, channelID int, key string) {
+	if b == nil || workID <= 0 || channelID <= 0 || key == "" {
+		return
+	}
+	state := b.anchors[workID]
+	if state == nil {
+		state = &channelAnchorState{channelID: channelID, keys: make(map[string]bool)}
+		b.anchors[workID] = state
+	}
+	if state.conflict || state.keys[key] {
+		return
+	}
+	if state.channelID != channelID {
+		state.conflict = true
+		return
+	}
+	state.keys[key] = true
+}
+
+func (b *batchScheduleContext) trustedChannel(workID int) (channelID, anchors int, ok bool) {
+	if b == nil {
+		return 0, 0, false
+	}
+	state := b.anchors[workID]
+	if state == nil || state.conflict || len(state.keys) < 2 {
+		return 0, 0, false
+	}
+	return state.channelID, len(state.keys), true
+}
+
 func processFile(
 	file string,
 	client *annict.Client,
@@ -161,8 +228,12 @@ func processFile(
 	dryRun, verbose bool,
 	confidenceThreshold int,
 	outputDir string,
-	syobocalClients ...syobocalProgramClient,
+	contexts ...*processingContext,
 ) *renamer.RenameResult {
+	var runtime *processingContext
+	if len(contexts) > 0 {
+		runtime = contexts[0]
+	}
 	baseName := filepath.Base(file)
 	fmt.Fprintf(os.Stderr, "Processing: %s\n", baseName)
 
@@ -241,18 +312,22 @@ func processFile(
 	fmt.Fprintf(os.Stderr, "  Annict:    %d work candidate(s): %s\n", len(works), workTitles(works))
 
 	// Work entries cached before Syobocal support do not contain a TID. Refresh
-	// only a date-only candidate so existing numbered paths retain their current
-	// cache behavior and date inference does not remain disabled for seven days.
-	if dateOnlyRecovery && len(works) == 1 && works[0].SyobocalTID == "" {
+	// only date-only candidates and numbered files that can serve as batch
+	// anchors, leaving unrelated numbered paths on their existing cache flow.
+	needsAnchorMetadata := runtime != nil && runtime.batchSchedule != nil && runtime.batchSchedule.wantsAnchors(meta.WorkTitle, works[0].Title)
+	if (dateOnlyRecovery || needsAnchorMetadata) && len(works) == 1 && works[0].SyobocalTID == "" {
+		originalWork := works[0]
 		refreshed, refreshErr := refreshWorkMetadata(client, c, meta.WorkTitle, workCache, episodesCache)
-		if refreshErr != nil {
+		if refreshErr != nil && dateOnlyRecovery {
 			return &renamer.RenameResult{
 				OriginalPath: file,
 				SkipReason:   fmt.Sprintf("date-only episode could not refresh Annict metadata: %v", refreshErr),
 			}
 		}
-		works = refreshed
-		if len(works) == 0 {
+		if refreshErr == nil && len(refreshed) == 1 && refreshed[0].ID == originalWork.ID {
+			works = refreshed
+		}
+		if dateOnlyRecovery && (len(refreshed) != 1 || refreshed[0].ID != originalWork.ID) {
 			return &renamer.RenameResult{
 				OriginalPath: file,
 				SkipReason:   fmt.Sprintf("date-only episode could not uniquely refresh Annict work %q", meta.WorkTitle),
@@ -280,10 +355,12 @@ func processFile(
 	var result *matcher.MatchResult
 	if dateOnlyRecovery {
 		var scheduleClient syobocalProgramClient
-		if len(syobocalClients) > 0 {
-			scheduleClient = syobocalClients[0]
+		var batchSchedule *batchScheduleContext
+		if runtime != nil {
+			scheduleClient = runtime.syobocalClient
+			batchSchedule = runtime.batchSchedule
 		}
-		result, err = matchDateOnly(meta, works, episodesCache, c, scheduleClient)
+		result, err = matchDateOnly(meta, works, episodesCache, c, scheduleClient, batchSchedule)
 		if err != nil {
 			return &renamer.RenameResult{
 				OriginalPath: file,
@@ -387,6 +464,21 @@ func processFile(
 		}
 	}
 
+	// Numbered recordings in the same batch can fingerprint a broadcast
+	// channel for later date-only files. Failure to establish an anchor never
+	// changes the already-safe numbered result.
+	if runtime != nil && runtime.batchSchedule != nil && runtime.syobocalClient != nil &&
+		meta.EpisodeNumber > 0 && !meta.RecordedDate.IsZero() && result.Work != nil && result.Episode != nil &&
+		runtime.batchSchedule.wantsAnchors(meta.WorkTitle, result.Work.Title) {
+		if anchorReason, anchorErr := observeScheduleAnchor(meta, result, c, runtime.syobocalClient, runtime.batchSchedule); verbose {
+			if anchorErr != nil {
+				fmt.Fprintf(os.Stderr, "  Schedule anchor skipped: %v\n", anchorErr)
+			} else {
+				fmt.Fprintf(os.Stderr, "  Schedule anchor: %s\n", anchorReason)
+			}
+		}
+	}
+
 	// Step 7: Reserve the batch destination before renaming. The filesystem
 	// no-replace checks still protect against pre-existing entries; this map
 	// additionally catches two sources in the same batch that would otherwise
@@ -432,6 +524,36 @@ func isDateOnlyRecoveryCandidate(meta *parser.RecordingMetadata) bool {
 	return true
 }
 
+// prioritizeDateOnlyFiles keeps each group stable but places explicit
+// episode identities first. That guarantees channel anchors are available to
+// every date-only candidate and gives explicit recordings first claim on a
+// duplicate destination.
+func prioritizeDateOnlyFiles(files []string) ([]string, *batchScheduleContext) {
+	batch := newBatchScheduleContext()
+	dateOnly := make([]bool, len(files))
+	for i, file := range files {
+		meta, err := parser.ParseFilename(filepath.Base(file))
+		if err != nil || !isDateOnlyRecoveryCandidate(meta) {
+			continue
+		}
+		dateOnly[i] = true
+		batch.targetTitles[normalize.NormalizeTitleForMatch(meta.WorkTitle)] = true
+	}
+
+	ordered := make([]string, 0, len(files))
+	for i, file := range files {
+		if !dateOnly[i] {
+			ordered = append(ordered, file)
+		}
+	}
+	for i, file := range files {
+		if dateOnly[i] {
+			ordered = append(ordered, file)
+		}
+	}
+	return ordered, batch
+}
+
 func directoryTitleHint(file, parsedTitle string) (string, bool) {
 	dir := filepath.Clean(filepath.Dir(file))
 	hint := filepath.Base(dir)
@@ -473,7 +595,7 @@ func refreshWorkMetadata(client *annict.Client, c *cache.Cache, title string, wc
 	return works, nil
 }
 
-func matchDateOnly(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork map[int][]annict.Episode, c *cache.Cache, client syobocalProgramClient) (*matcher.MatchResult, error) {
+func matchDateOnly(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork map[int][]annict.Episode, c *cache.Cache, client syobocalProgramClient, batch *batchScheduleContext) (*matcher.MatchResult, error) {
 	if len(works) != 1 {
 		return nil, fmt.Errorf("Annict work is ambiguous (%d candidates)", len(works))
 	}
@@ -486,16 +608,22 @@ func matchDateOnly(meta *parser.RecordingMetadata, works []annict.Work, episodes
 		return nil, fmt.Errorf("Syobocal client is unavailable")
 	}
 
-	programs, cached := c.GetSyobocalPrograms(tid, meta.RecordedDate)
-	if !cached {
-		programs, err = client.GetPrograms(tid, meta.RecordedDate)
-		if err != nil {
-			return nil, err
-		}
-		_ = c.SetSyobocalPrograms(tid, meta.RecordedDate, programs)
+	programs, err := getSyobocalPrograms(c, client, tid, meta.RecordedDate)
+	if err != nil {
+		return nil, err
 	}
 
 	episode, reason := dateinfer.ResolveUnique(meta.RecordedDate, episodesByWork[work.ID], programs)
+	if episode == nil {
+		if channelID, anchors, ok := batch.trustedChannel(work.ID); ok {
+			if channelEpisode, channelReason := dateinfer.ResolveForChannel(meta.RecordedDate, episodesByWork[work.ID], programs, channelID); channelEpisode != nil {
+				episode = channelEpisode
+				reason = fmt.Sprintf("%s using %d consistent batch anchors", channelReason, anchors)
+			} else {
+				reason = fmt.Sprintf("%s; trusted channel also failed: %s", reason, channelReason)
+			}
+		}
+	}
 	if episode == nil {
 		return nil, errors.New(reason)
 	}
@@ -508,6 +636,37 @@ func matchDateOnly(meta *parser.RecordingMetadata, works []annict.Work, episodes
 			reason,
 		},
 	}, nil
+}
+
+func getSyobocalPrograms(c *cache.Cache, client syobocalProgramClient, tid int, date time.Time) ([]syobocal.Program, error) {
+	if programs, ok := c.GetSyobocalPrograms(tid, date); ok {
+		return programs, nil
+	}
+	programs, err := client.GetPrograms(tid, date)
+	if err != nil {
+		return nil, err
+	}
+	_ = c.SetSyobocalPrograms(tid, date, programs)
+	return programs, nil
+}
+
+func observeScheduleAnchor(meta *parser.RecordingMetadata, result *matcher.MatchResult, c *cache.Cache, client syobocalProgramClient, batch *batchScheduleContext) (string, error) {
+	tid, err := strconv.Atoi(result.Work.SyobocalTID)
+	if err != nil || tid <= 0 {
+		return "", fmt.Errorf("Annict work %q has no valid Syobocal TID", result.Work.Title)
+	}
+	programs, err := getSyobocalPrograms(c, client, tid, meta.RecordedDate)
+	if err != nil {
+		return "", err
+	}
+	channelID, reason := dateinfer.AnchorChannel(meta.RecordedDate, result.Episode, programs)
+	if channelID <= 0 {
+		return "", errors.New(reason)
+	}
+	episodeNumber, _ := matcher.EpisodeNumber(result.Episode)
+	key := fmt.Sprintf("%s:%d", meta.RecordedDate.In(time.FixedZone("JST", 9*60*60)).Format("2006-01-02"), episodeNumber)
+	batch.record(result.Work.ID, channelID, key)
+	return reason, nil
 }
 
 func searchWork(client *annict.Client, c *cache.Cache, title string, wc map[string][]annict.Work, ec map[int][]annict.Episode) ([]annict.Work, error) {

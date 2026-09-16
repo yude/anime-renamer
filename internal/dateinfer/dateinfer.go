@@ -14,11 +14,61 @@ import (
 
 var jst = time.FixedZone("JST", 9*60*60)
 
+// AnchorChannel identifies the only channel whose clean same-day schedule row
+// agrees with an already-known Annict episode. A date that maps that episode to
+// more than one channel is not a usable channel fingerprint.
+func AnchorChannel(date time.Time, episode *annict.Episode, programs []syobocal.Program) (int, string) {
+	if date.IsZero() || episode == nil {
+		return 0, "anchor date or episode is missing"
+	}
+	number, ok := matcher.EpisodeNumber(episode)
+	if !ok {
+		return 0, "anchor episode has no positive integer number"
+	}
+	dateKey := date.In(jst).Format("2006-01-02")
+	channelID := 0
+	rows := 0
+	for _, program := range programs {
+		if program.Deleted || program.Warn || program.Count != number || program.ChannelID <= 0 {
+			continue
+		}
+		if program.StartedAt.In(jst).Format("2006-01-02") != dateKey {
+			continue
+		}
+		if episode.Title != "" && program.Subtitle != "" && !normalize.Compare(episode.Title, program.Subtitle) {
+			continue
+		}
+		rows++
+		if channelID == 0 {
+			channelID = program.ChannelID
+		} else if channelID != program.ChannelID {
+			return 0, fmt.Sprintf("anchor episode %d appears on multiple channels", number)
+		}
+	}
+	if channelID == 0 {
+		return 0, fmt.Sprintf("no schedule row confirms anchor episode %d", number)
+	}
+	return channelID, fmt.Sprintf("episode %d uniquely fingerprints channel %d from %d row(s)", number, channelID, rows)
+}
+
 // ResolveUnique returns an Annict episode only when every usable schedule row
 // that starts on date agrees on one positive episode number and that number
 // maps to exactly one Annict episode. The explanatory string is suitable for
 // a safe-skip diagnostic when no episode is returned.
 func ResolveUnique(date time.Time, episodes []annict.Episode, programs []syobocal.Program) (*annict.Episode, string) {
+	return resolve(date, episodes, programs, 0)
+}
+
+// ResolveForChannel applies the same strict resolution after limiting schedule
+// rows to a channel established independently by batch anchors.
+func ResolveForChannel(date time.Time, episodes []annict.Episode, programs []syobocal.Program, channelID int) (*annict.Episode, string) {
+	if channelID <= 0 {
+		return nil, "trusted channel is missing"
+	}
+	return resolve(date, episodes, programs, channelID)
+}
+
+func resolve(date time.Time, episodes []annict.Episode, programs []syobocal.Program, channelID int) (*annict.Episode, string) {
 	if date.IsZero() {
 		return nil, "recording date is missing"
 	}
@@ -29,6 +79,9 @@ func ResolveUnique(date time.Time, episodes []annict.Episode, programs []syoboca
 	var subtitles []string
 	for _, program := range programs {
 		if program.Deleted || program.Warn || program.Count <= 0 {
+			continue
+		}
+		if channelID > 0 && program.ChannelID != channelID {
 			continue
 		}
 		if program.StartedAt.In(jst).Format("2006-01-02") != dateKey {
@@ -45,6 +98,9 @@ func ResolveUnique(date time.Time, episodes []annict.Episode, programs []syoboca
 		}
 	}
 	if usable == 0 {
+		if channelID > 0 {
+			return nil, fmt.Sprintf("no usable schedule starts on %s for channel %d", dateKey, channelID)
+		}
 		return nil, fmt.Sprintf("no usable schedule starts on %s", dateKey)
 	}
 
@@ -68,6 +124,9 @@ func ResolveUnique(date time.Time, episodes []annict.Episode, programs []syoboca
 				return nil, fmt.Sprintf("schedule subtitle %q conflicts with Annict subtitle %q", subtitle, matched.Title)
 			}
 		}
+	}
+	if channelID > 0 {
+		return matched, fmt.Sprintf("trusted channel %d schedule uniquely identified Annict episode %d from %d broadcast row(s)", channelID, count, usable)
 	}
 	return matched, fmt.Sprintf("schedule uniquely identified Annict episode %d from %d broadcast row(s)", count, usable)
 }
