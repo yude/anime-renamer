@@ -56,7 +56,7 @@ func TestGetProgramsRejectsUnsafeResponses(t *testing.T) {
 		code int
 		want string
 	}{
-		{name: "HTTP status", code: http.StatusTooManyRequests, want: "HTTP 429"},
+		{name: "HTTP status", code: http.StatusBadRequest, want: "HTTP 400"},
 		{name: "API status", body: `<ProgLookupResponse><Result><Code>500</Code><Message>bad query</Message></Result></ProgLookupResponse>`, want: "result 500"},
 		{name: "invalid XML", body: `<ProgLookupResponse>`, want: "decode ProgLookup"},
 		{name: "invalid timestamp", body: `<ProgLookupResponse><ProgItems><ProgItem><PID>1</PID><TID>1</TID><StTime>bad</StTime><EdTime>2022-09-23 01:00:00</EdTime></ProgItem></ProgItems><Result><Code>200</Code></Result></ProgLookupResponse>`, want: "start time"},
@@ -78,6 +78,68 @@ func TestGetProgramsRejectsUnsafeResponses(t *testing.T) {
 				t.Fatalf("GetPrograms() error = %v, want substring %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestGetProgramsRetriesRateLimit(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts < 3 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		fmt.Fprint(w, `<ProgLookupResponse><ProgItems></ProgItems><Result><Code>200</Code></Result></ProgLookupResponse>`)
+	}))
+	defer server.Close()
+
+	client := newClient(server.URL, 0)
+	var sleeps []time.Duration
+	client.sleep = func(delay time.Duration) { sleeps = append(sleeps, delay) }
+	if _, err := client.GetPrograms(1, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 3 {
+		t.Fatalf("attempts = %d, want 3", attempts)
+	}
+	if len(sleeps) != 2 || sleeps[0] != default429Delay || sleeps[1] != default429Delay {
+		t.Fatalf("sleeps = %v, want two default 429 delays", sleeps)
+	}
+}
+
+func TestGetProgramsHonorsRetryAfter(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.Header().Set("Retry-After", "2")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		fmt.Fprint(w, `<ProgLookupResponse><ProgItems></ProgItems><Result><Code>200</Code></Result></ProgLookupResponse>`)
+	}))
+	defer server.Close()
+
+	client := newClient(server.URL, 0)
+	var slept time.Duration
+	client.sleep = func(delay time.Duration) { slept += delay }
+	if _, err := client.GetPrograms(1, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if slept != 2*time.Second {
+		t.Fatalf("slept = %v, want 2s", slept)
+	}
+}
+
+func TestGetProgramsTreatsAPINotFoundAsEmpty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<ProgLookupResponse><Result><Code>404</Code><Message>条件に一致するデータは存在しません</Message></Result></ProgLookupResponse>`)
+	}))
+	defer server.Close()
+
+	programs, err := NewClientWithBaseURL(server.URL).GetPrograms(1, time.Now())
+	if err != nil || len(programs) != 0 {
+		t.Fatalf("GetPrograms() = %+v, %v; want empty success", programs, err)
 	}
 }
 

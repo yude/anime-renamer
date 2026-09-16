@@ -18,6 +18,8 @@ const (
 	userAgent            = "anime-renamer (+https://github.com/yude/anime-renamer)"
 	maxResponseBodyBytes = 4 << 20
 	minimumRequestGap    = time.Second
+	maxRequestAttempts   = 3
+	default429Delay      = 10 * time.Second
 )
 
 var jst = time.FixedZone("JST", 9*60*60)
@@ -115,33 +117,56 @@ func (c *Client) GetPrograms(tid int, date time.Time) ([]Program, error) {
 	q.Set("JOIN", "SubTitles")
 	u.RawQuery = q.Encode()
 
-	c.waitForRateLimit()
-	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
-	if err != nil {
-		return nil, fmt.Errorf("create ProgLookup request: %w", err)
-	}
-	req.Header.Set("User-Agent", userAgent)
+	var body []byte
+	for attempt := 1; attempt <= maxRequestAttempts; attempt++ {
+		c.waitForRateLimit()
+		req, err := http.NewRequest(http.MethodGet, u.String(), nil)
+		if err != nil {
+			return nil, fmt.Errorf("create ProgLookup request: %w", err)
+		}
+		req.Header.Set("User-Agent", userAgent)
 
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("request ProgLookup: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("ProgLookup returned HTTP %d", resp.StatusCode)
-	}
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("request ProgLookup: %w", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 8<<10))
+			_ = resp.Body.Close()
+			if attempt < maxRequestAttempts && (resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500) {
+				delay := time.Duration(attempt) * time.Second
+				if resp.StatusCode == http.StatusTooManyRequests {
+					delay = retryAfterDelay(resp.Header.Get("Retry-After"), c.now())
+					if delay <= 0 {
+						delay = default429Delay
+					}
+				}
+				c.sleep(delay)
+				continue
+			}
+			return nil, fmt.Errorf("ProgLookup returned HTTP %d", resp.StatusCode)
+		}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("read ProgLookup response: %w", err)
-	}
-	if len(body) > maxResponseBodyBytes {
-		return nil, fmt.Errorf("ProgLookup response exceeds %d bytes", maxResponseBodyBytes)
+		body, err = io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes+1))
+		closeErr := resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("read ProgLookup response: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("close ProgLookup response: %w", closeErr)
+		}
+		if len(body) > maxResponseBodyBytes {
+			return nil, fmt.Errorf("ProgLookup response exceeds %d bytes", maxResponseBodyBytes)
+		}
+		break
 	}
 
 	var decoded lookupResponse
 	if err := xml.Unmarshal(body, &decoded); err != nil {
 		return nil, fmt.Errorf("decode ProgLookup response: %w", err)
+	}
+	if decoded.Result.Code == http.StatusNotFound {
+		return []Program{}, nil
 	}
 	if decoded.Result.Code != http.StatusOK {
 		return nil, fmt.Errorf("ProgLookup result %d: %s", decoded.Result.Code, decoded.Result.Message)
@@ -173,6 +198,18 @@ func (c *Client) GetPrograms(tid int, date time.Time) ([]Program, error) {
 		})
 	}
 	return programs, nil
+}
+
+func retryAfterDelay(value string, now time.Time) time.Duration {
+	if seconds, err := strconv.Atoi(value); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	if deadline, err := http.ParseTime(value); err == nil {
+		if delay := deadline.Sub(now); delay > 0 {
+			return delay
+		}
+	}
+	return 0
 }
 
 func (c *Client) waitForRateLimit() {
