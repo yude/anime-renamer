@@ -670,12 +670,56 @@ func TestMatchSubtitlePresentationVariantsReachThreshold(t *testing.T) {
 		{annict: "するがモンキー 其ノ貮", file: "するがモンキー 其ノ貳"},
 		{annict: "夢にまでみた？フジ◯◯", file: "夢にまでみた？フジ〇〇"},
 		{annict: "なんでもない一日", file: "なんでもない１日"},
+		{annict: "やがて雨はやんで", file: "やがて雨は止んで"},
+		{annict: "はじめての鉱物採集", file: "初めての鉱物採集"},
+		{annict: "るらちゃんはチヤホヤされたい", file: "るらちゃんはちやほやされたい"},
+		{annict: "いけいけゴーゴー夏休み", file: "イケイケゴーゴー夏休み"},
+		{annict: "ようこそ、ラ・ソレイユヘ！", file: "ようこそ、ラ・ソレイユへ！"},
+		{annict: "俺達の戦いはこれからだ！", file: "俺たちの戦いはこれからだ！"},
+		{annict: "柏田さんと太田くんと海", file: "柏田さんと太田君と海"},
+		{annict: "魔物の町の住人たち", file: "魔物の町の住人達"},
+		{annict: "街角ギャラクシー☆彡", file: "街角ギャラクシー"},
+		{annict: "日常パートめっちゃすこ〰〰♡♡♡", file: "日常パートめっちゃすこ~~~~~・・・"},
 	} {
 		episodes := map[int][]annict.Episode{1: {{ID: 100 + i, Number: float64Ptr(1), Title: tt.annict}}}
 		meta := &parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 1, Subtitle: tt.file}
 		result := Match(meta, works, episodes, nil)
 		if result == nil || result.Confidence < AutoRenameThreshold {
 			t.Errorf("Match(%q, %q) = %+v, want confidence >= %d", tt.annict, tt.file, result, AutoRenameThreshold)
+		}
+	}
+}
+
+func TestMatchExplicitDecorativeSubtitleSuffixReachThreshold(t *testing.T) {
+	for i, tt := range []struct {
+		annict string
+		file   string
+	}{
+		{annict: "遠い記憶 -sometime,somewhere-", file: "遠い記憶"},
+		{annict: "イモ☆ヨバ", file: "イモ☆ヨバ ～妹なんて呼ばないで！～"},
+		{annict: "元カノとカノジョ", file: "元カノとカノジョ -トリカノ-"},
+		{annict: "笑顔のカタチ(〃＞▽＜〃)", file: "笑顔のカタチ"},
+	} {
+		result := Match(
+			&parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 1, Subtitle: tt.file},
+			[]annict.Work{{ID: 1, Title: "作品"}},
+			map[int][]annict.Episode{1: {{ID: 700 + i, Number: float64Ptr(1), Title: tt.annict}}},
+			nil,
+		)
+		if result == nil || result.Confidence < AutoRenameThreshold {
+			t.Errorf("Match(%q, %q) = %+v, want confidence >= %d", tt.annict, tt.file, result, AutoRenameThreshold)
+		}
+	}
+}
+
+func TestDecorativeSubtitleSuffixRejectsMeaningfulQualifiers(t *testing.T) {
+	for _, decorated := range []string{
+		"これは十分に長い本編タイトル（前編）",
+		"これは十分に長い本編タイトル-後編-",
+		"これは十分に長い本編タイトル～完結～",
+	} {
+		if subtitleDecorativeSuffixMatch("これは十分に長い本編タイトル", decorated) {
+			t.Errorf("subtitleDecorativeSuffixMatch accepted %q", decorated)
 		}
 	}
 }

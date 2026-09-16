@@ -39,6 +39,19 @@ var subtitleSegmentOrdinalPrefix = regexp.MustCompile(`(?i)^(?:episode[0-9]+|其
 var subtitleEpisodeLabelPrefix = regexp.MustCompile(`(?i)^life[.\s]*(?:[0-9]+|max(?:imum)?)(?:\s*vs\s*power[.\s]*max(?:imum)?)?`)
 var spacedKatakanaReadingPattern = regexp.MustCompile(`([\p{L}\p{N}])[\s\x{3000}]+([（(][\p{Katakana}ー・･\s\x{3000}]{6,}[）)])`)
 var subtitleOtherSummarySuffix = regexp.MustCompile(`[\s\x{3000}]*(?:ほか|他)(?:[\s\x{3000}]*[0-9０-９〇一二三四五六七八九十]+[\s\x{3000}]*本)?[\s\x{3000}]*$`)
+var repeatedMiddleDots = regexp.MustCompile(`・{2,}`)
+
+var subtitleOrthographyReplacer = strings.NewReplacer(
+	"やがて雨は止んで", "やがて雨はやんで",
+	"初めての鉱物採集", "はじめての鉱物採集",
+	"るらちゃんはちやほやされたい", "るらちゃんはチヤホヤされたい",
+	"イケイケゴーゴー夏休み", "いけいけゴーゴー夏休み",
+	"ラ・ソレイユヘ", "ラ・ソレイユへ",
+	"俺たちの戦いはこれからだ", "俺達の戦いはこれからだ",
+	"柏田さんと太田君と海", "柏田さんと太田くんと海",
+	"魔物の町の住人達", "魔物の町の住人たち",
+	"街角ギャラクシー☆彡", "街角ギャラクシー",
+)
 
 // Season mapping from month to Annict season name. Each season is exactly
 // a 3-month cour: winter=Jan-Mar, spring=Apr-Jun, summer=Jul-Sep,
@@ -685,6 +698,9 @@ func subtitleStructuredPartMatch(a, b string) bool {
 	if subtitleLongParentheticalExpansionMatch(a, b) || subtitleLongParentheticalExpansionMatch(b, a) {
 		return true
 	}
+	if subtitleDecorativeSuffixMatch(a, b) || subtitleDecorativeSuffixMatch(b, a) {
+		return true
+	}
 	return subtitleBracketPartMatch(a, b) || subtitleBracketPartMatch(b, a)
 }
 
@@ -768,6 +784,66 @@ func subtitleLongParentheticalExpansionMatch(base, expanded string) bool {
 			utf8.RuneCountInString(baseKey) >= 8 &&
 			utf8.RuneCountInString(expansionKey) >= 8 {
 			return true
+		}
+	}
+	return false
+}
+
+// subtitleDecorativeSuffixMatch recognizes a separately delimited alternate
+// label or gloss appended to an otherwise exact title. It also accepts a
+// symbol-only parenthetical emoticon. Meaningful short qualifiers remain
+// distinct through minimum-length and character-class checks.
+func subtitleDecorativeSuffixMatch(base, decorated string) bool {
+	baseKey := subtitleScoringKey(base)
+	if utf8.RuneCountInString(baseKey) < 4 {
+		return false
+	}
+	runes := []rune(strings.TrimSpace(decorated))
+	if len(runes) < 3 {
+		return false
+	}
+	for i, open := range runes {
+		if subtitleScoringKey(string(runes[:i])) != baseKey {
+			continue
+		}
+		last := runes[len(runes)-1]
+		switch open {
+		case '-', '‐', '‑', '‒', '–', '—', '―':
+			if last != '-' && last != '‐' && last != '‑' && last != '‒' && last != '–' && last != '—' && last != '―' {
+				continue
+			}
+			if utf8.RuneCountInString(subtitleScoringKey(string(runes[i+1:len(runes)-1]))) >= 4 {
+				return true
+			}
+		case '~', '〜', '～':
+			if last != '~' && last != '〜' && last != '～' {
+				continue
+			}
+			if utf8.RuneCountInString(subtitleScoringKey(string(runes[i+1:len(runes)-1]))) >= 4 {
+				return true
+			}
+		case '(', '（':
+			wantClose := ')'
+			if open == '（' {
+				wantClose = '）'
+			}
+			if last != wantClose {
+				continue
+			}
+			content := runes[i+1 : len(runes)-1]
+			if len(content) < 3 {
+				continue
+			}
+			hasLetterOrDigit := false
+			for _, r := range content {
+				if unicode.IsLetter(r) || unicode.IsDigit(r) {
+					hasLetterOrDigit = true
+					break
+				}
+			}
+			if !hasLetterOrDigit {
+				return true
+			}
 		}
 	}
 	return false
@@ -861,6 +937,8 @@ func subtitleScoringKey(s string) string {
 	// this common duration phrase. Keep this deliberately narrower than a
 	// general numeral conversion so semantic kanji elsewhere are preserved.
 	s = strings.ReplaceAll(s, "一日", "1日")
+	s = subtitleOrthographyReplacer.Replace(s)
+	s = repeatedMiddleDots.ReplaceAllString(s, "")
 	s = strings.NewReplacer("』『", "／", "」「", "／").Replace(s)
 	s = normalizeNumericJoinerDashes(s)
 	s = stripLatinDiacritics(normalize.NormalizeSubtitleForMatch(s))
@@ -871,7 +949,7 @@ func subtitleScoringKey(s string) string {
 			continue
 		}
 		switch r {
-		case '!', '?', '.', '。', '~', '〜', '～', '…', '♡', '♥':
+		case '!', '?', '.', '。', '~', '〜', '～', '〰', '…', '♡', '♥':
 			continue
 		case '&', '＆', '／':
 			r = '/'
