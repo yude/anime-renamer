@@ -649,6 +649,8 @@ func TestMatchSubtitlePresentationVariantsReachThreshold(t *testing.T) {
 		{annict: "Après la pluie―彼の願い―", file: "Apres la pluie―彼の願い―"},
 		{annict: "ちょー5％ーマジか!?だった", file: "ちょ—5%—マジか!？だった"},
 		{annict: "寳月詠子", file: "寶月詠子"},
+		{annict: "素人《ビギナー》", file: "素人≪ビギナー≫"},
+		{annict: "『確率機』『シングル二倍』『夢芝居』", file: "確率機／シングル二倍／夢芝居"},
 	} {
 		episodes := map[int][]annict.Episode{1: {{ID: 100 + i, Number: float64Ptr(1), Title: tt.annict}}}
 		meta := &parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 1, Subtitle: tt.file}
@@ -656,6 +658,34 @@ func TestMatchSubtitlePresentationVariantsReachThreshold(t *testing.T) {
 		if result == nil || result.Confidence < AutoRenameThreshold {
 			t.Errorf("Match(%q, %q) = %+v, want confidence >= %d", tt.annict, tt.file, result, AutoRenameThreshold)
 		}
+	}
+}
+
+func TestFindMatchingEpisodePrefersUniqueExactSubtitleOverConflictingNumber(t *testing.T) {
+	episodes := []annict.Episode{
+		{ID: 101, Number: float64Ptr(1), Title: "そうさ、京都に行こう"},
+		{ID: 102, Number: float64Ptr(2), Title: "修学旅行、いきなり襲撃です"},
+	}
+	got := findMatchingEpisode(2, "life.01 そうさ、京都に行こう", episodes)
+	if got == nil || got.ID != 101 {
+		t.Fatalf("findMatchingEpisode() = %+v, want unique subtitle episode 101", got)
+	}
+
+	episodes = append(episodes, annict.Episode{ID: 103, Number: float64Ptr(3), Title: "そうさ、京都に行こう"})
+	got = findMatchingEpisode(2, "life.01 そうさ、京都に行こう", episodes)
+	if got == nil || got.ID != 102 {
+		t.Fatalf("findMatchingEpisode() with repeated subtitle = %+v, want number episode 102", got)
+	}
+
+	maxEpisodes := []annict.Episode{
+		{ID: 111, Number: float64Ptr(11), Title: "赤龍帝(おとこ) 対 獅子王(おとこ)"},
+		{ID: 112, Number: float64Ptr(12), Title: "学園祭のライオンハート"},
+	}
+	if got := findMatchingEpisode(12, "life.MAX vs power.MAX 赤龍帝(おとこ) 対 獅子王(おとこ)", maxEpisodes); got == nil || got.ID != 111 {
+		t.Fatalf("findMatchingEpisode(life.MAX) = %+v, want episode 111", got)
+	}
+	if got := findMatchingEpisode(13, "life.MAXIMUM vs power.MAXIMUM 学園祭のライオンハート", maxEpisodes); got == nil || got.ID != 112 {
+		t.Fatalf("findMatchingEpisode(life.MAXIMUM) = %+v, want episode 112", got)
 	}
 }
 

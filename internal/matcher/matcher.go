@@ -36,6 +36,7 @@ var seriesContinuationPattern = regexp.MustCompile(`^(?:第?[0-9]+(?:期|クー�
 var episodeNumberTextPattern = regexp.MustCompile(`(?i)^(?:第\s*([0-9]+)\s*(?:話|幕|番|怪|夜|回|局|羽|R)|#\s*([0-9]+)|episode[.\s]*([0-9]+)|sailing\s*([0-9]+)|([0-9]+))$`)
 var kanjiEpisodeNumberTextPattern = regexp.MustCompile(`^第\s*([〇一二三四五六七八九十百千壱弐参肆伍陸漆捌玖拾]+)\s*(?:話|幕|番|怪|夜|回|局|羽|R)$`)
 var subtitleSegmentOrdinalPrefix = regexp.MustCompile(`(?i)^(?:episode[0-9]+|其の[0-9一二三四五六七八九十]+)`)
+var subtitleEpisodeLabelPrefix = regexp.MustCompile(`(?i)^life[.\s]*(?:[0-9]+|max(?:imum)?)(?:\s*vs\s*power[.\s]*max(?:imum)?)?`)
 
 // Season mapping from month to Annict season name. Each season is exactly
 // a 3-month cour: winter=Jan-Mar, spring=Apr-Jun, summer=Jul-Sep,
@@ -513,12 +514,16 @@ func findMatchingEpisode(number int, subtitle string, episodes []annict.Episode)
 	if numberAndSubtitleMatch != nil {
 		return numberAndSubtitleMatch
 	}
-	// Fall back to number-only match
-	if numberMatch != nil {
-		return numberMatch
-	}
+	// A unique exact subtitle is stronger evidence than a conflicting local
+	// number. Some EPGs count an episode zero as local #1 while Annict retains
+	// the official life.0/life.1 numbering. Ambiguous repeated subtitles do
+	// not override the direct number match.
 	if subtitleMatch != nil && !subtitleAmbiguous {
 		return subtitleMatch
+	}
+	// Fall back to number-only match.
+	if numberMatch != nil {
+		return numberMatch
 	}
 	// Some explicitly titled later seasons restart their EPG numbering at 1
 	// while Annict retains continuous series numbers. Only map by ordinal when
@@ -621,9 +626,14 @@ func subtitlePartialMatch(a, b string) bool {
 }
 
 func subtitlesEquivalent(a, b string) bool {
-	na := normalize.NormalizeSubtitleForMatch(a)
-	nb := normalize.NormalizeSubtitleForMatch(b)
+	na := subtitleIdentityKey(a)
+	nb := subtitleIdentityKey(b)
 	return na != "" && nb != "" && na == nb
+}
+
+func subtitleIdentityKey(s string) string {
+	key := normalize.NormalizeSubtitleForMatch(s)
+	return subtitleEpisodeLabelPrefix.ReplaceAllString(key, "")
 }
 
 // subtitlesEquivalentForScoring permits a minor EPG omission only after the
@@ -746,6 +756,7 @@ func subtitleBracketPartMatch(container, whole string) bool {
 // and integer episode number have already selected an episode. Candidate
 // selection continues to use the stricter subtitlesEquivalent key.
 func subtitleScoringKey(s string) string {
+	s = strings.NewReplacer("』『", "／", "」「", "／").Replace(s)
 	s = normalizeNumericJoinerDashes(s)
 	s = stripLatinDiacritics(normalize.NormalizeSubtitleForMatch(s))
 	var b strings.Builder
@@ -766,7 +777,7 @@ func subtitleScoringKey(s string) string {
 		}
 		b.WriteRune(r)
 	}
-	return b.String()
+	return subtitleEpisodeLabelPrefix.ReplaceAllString(b.String(), "")
 }
 
 // normalizeNumericJoinerDashes repairs the narrow EPG convention where a

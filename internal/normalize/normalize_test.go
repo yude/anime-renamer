@@ -52,6 +52,7 @@ func TestNormalizeForSearch(t *testing.T) {
 		// surrounding text gets corrupted into invalid UTF-8.
 		{"作品《あ》続き", "作品 続き"},
 		{"からくり撫子《オートマタ》", "からくり撫子"},
+		{"素人≪ビギナー≫", "素人"},
 		{"『サブタイトル』", "サブタイトル"},
 		{"作品(2026)", "作品 2026"},
 		{"作品（2026）", "作品 2026"},

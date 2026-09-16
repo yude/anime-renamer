@@ -56,6 +56,7 @@ func NormalizeForSearch(s string) string {
 
 	// Strip 《》 brackets and their content (reading aids)
 	s = stripBracketContent(s, '《', '》')
+	s = stripBracketContent(s, '≪', '≫')
 
 	// Convert parentheses to spaces for fuzzy matching
 	// Handles: (X), （X） → " X "
