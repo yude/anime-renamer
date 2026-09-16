@@ -52,6 +52,7 @@ var (
 	multiTrailingEpisodeRangePattern = regexp.MustCompile(`[0-9０-９]+[\s\x{3000}]*[~〜～－―ー-][\s\x{3000}]*[0-9０-９]+[\s\x{3000}]*話`)
 	multiEpisodeListPattern          = regexp.MustCompile(`(?:第[\s\x{3000}]*)?[0-9０-９]+(?:[\s\x{3000}]*[,，、&＆/／][\s\x{3000}]*[0-9０-９]+)+[\s\x{3000}]*話`)
 	separatedHashEpisodes            = regexp.MustCompile(`[#＃♯][\s\x{3000}]*[0-9０-９]+[^#＃♯]*(?:[／/]|[」』])[\s\x{3000}]*[#＃♯][\s\x{3000}]*[0-9０-９]+(?:[\s\x{3000}]|[「『]|$)`)
+	parenthesizedEpisodeRangePattern = regexp.MustCompile(`[（(][\s\x{3000}]*[0-9０-９]{1,3}[\s\x{3000}]*[）)][\s\x{3000}]*[~〜～－―ー-][\s\x{3000}]*[（(][\s\x{3000}]*[0-9０-９]{1,3}[\s\x{3000}]*[）)]`)
 
 	// Episode patterns matching both full-width and half-width forms.
 	// These run against the ORIGINAL string (pre-normalization).
@@ -67,10 +68,17 @@ var (
 	// required to avoid treating 第2クール as episode 2.
 	arabicEpisodePattern = regexp.MustCompile(`第[\s\x{3000}]*([0-9０-９]+)[\s\x{3000}]*([話幕番怪夜回局羽RＲ])`)
 	// 第三話, 第五幕, 第一夜, 第六局 (kanji digits)
-	kanjiEpisodePattern     = regexp.MustCompile(`第[\s\x{3000}]*([〇一二三四五六七八九十百千壱弐参肆伍陸漆捌玖拾]+)[\s\x{3000}]*([話幕番怪夜回局羽RＲ])`)
-	bareEpisodePattern      = regexp.MustCompile(`([0-9０-９]+)[\s\x{3000}]*話`)
-	bareKanjiEpisodePattern = regexp.MustCompile(`[「『]?([〇一二三四五六七八九十百千壱弐参肆伍陸漆捌玖拾]+)話`)
-	stepEpisodePattern      = regexp.MustCompile(`[【\[]?(?:すてっぷ|ステップ)[\s\x{3000}]*([①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳])[】\]]?`)
+	kanjiEpisodePattern         = regexp.MustCompile(`第[\s\x{3000}]*([〇一二三四五六七八九十百千壱弐参肆伍陸漆捌玖拾]+)[\s\x{3000}]*([話幕番怪夜回局羽RＲ])`)
+	bareEpisodePattern          = regexp.MustCompile(`([0-9０-９]+)[\s\x{3000}]*話`)
+	bareKanjiEpisodePattern     = regexp.MustCompile(`[「『]?([〇一二三四五六七八九十百千壱弐参肆伍陸漆捌玖拾]+)話`)
+	stepEpisodePattern          = regexp.MustCompile(`[【\[]?(?:すてっぷ|ステップ)[\s\x{3000}]*([①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳])[】\]]?`)
+	parenthesizedEpisodePattern = regexp.MustCompile(`[（(][\s\x{3000}]*([0-9０-９]{1,3})[\s\x{3000}]*[）)]`)
+	counterEpisodePattern       = regexp.MustCompile(`([0-9０-９]+)[\s\x{3000}]*(?:時限目|軒目|日記)`)
+	kanjiVolumeEpisodePattern   = regexp.MustCompile(`([〇一二三四五六七八九十百千壱弐参肆伍陸漆捌玖拾]+)[\s\x{3000}]*の巻`)
+	karteEpisodePattern         = regexp.MustCompile(`(?i)karte[.．\s\x{3000}]*([0-9０-９]+)`)
+	missionEpisodePattern       = regexp.MustCompile(`(?i)mission[：:.．\s\x{3000}]*([0-9０-９]+)`)
+	levelEpisodePattern         = regexp.MustCompile(`(?i)lv[.．][\s\x{3000}]*([0-9０-９]+)`)
+	rollEpisodePattern          = regexp.MustCompile(`ろ[~〜～ー]る[\s\x{3000}]*([0-9０-９]+)`)
 
 	leadingBracketTagPattern = regexp.MustCompile(`^[\s]*【[^】]*】`)
 	leadingAngleTagPattern   = regexp.MustCompile(`^[\s]*＜[^＞]*＞`)
@@ -231,6 +239,7 @@ func ambiguousEpisodeNotation(name string) string {
 		multiTrailingEpisodeRangePattern,
 		multiEpisodeListPattern,
 		separatedHashEpisodes,
+		parenthesizedEpisodeRangePattern,
 	} {
 		if match := pattern.FindString(name); match != "" {
 			return match
@@ -328,6 +337,12 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 		epPattern1,
 		epPattern2,
 		arabicEpisodePattern,
+		parenthesizedEpisodePattern,
+		counterEpisodePattern,
+		karteEpisodePattern,
+		missionEpisodePattern,
+		levelEpisodePattern,
+		rollEpisodePattern,
 	}
 	if m := earliestEpisodeMatch(name, decimalPatterns...); m != nil {
 		parsedNumber, err := decimalEpisodeNumber(name[m[2]:m[3]])
@@ -347,6 +362,18 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 			}
 			if v <= 0 {
 				return nil, fmt.Errorf("invalid episode number %q: %w", kanjiNum, ErrUnsupportedEpisode)
+			}
+			episodeNumber = v
+			epStart = m[0]
+			epEnd = m[1]
+		}
+	}
+	if episodeNumber == 0 {
+		if m := earliestEpisodeMatch(name, kanjiVolumeEpisodePattern); m != nil {
+			kanjiNum := name[m[2]:m[3]]
+			v, ok := kanjiToInt(kanjiNum)
+			if !ok || v <= 0 {
+				return nil, fmt.Errorf("invalid episode number %q", kanjiNum)
 			}
 			episodeNumber = v
 			epStart = m[0]

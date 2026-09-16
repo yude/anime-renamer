@@ -754,6 +754,67 @@ func TestParseFilename(t *testing.T) {
 			wantEp:    1,
 			wantSub:   "兄妹の絆",
 		},
+		{
+			name:      "parenthesized broadcaster episode",
+			input:     "アニメ 映像研には手を出すな！（１０）「独自世界の対立！」[字].mp4",
+			wantTitle: "映像研には手を出すな！",
+			wantEp:    10,
+			wantSub:   "独自世界の対立！",
+		},
+		{
+			name:      "kanji volume episode",
+			input:     "くノ一ツバキの胸の内 十三の巻「決戦！」.mp4",
+			wantTitle: "くノ一ツバキの胸の内",
+			wantEp:    13,
+			wantSub:   "決戦！",
+		},
+		{
+			name:      "school period episode",
+			input:     "なんでここに先生が!? 10時限目.mp4",
+			wantTitle: "なんでここに先生が!?",
+			wantEp:    10,
+		},
+		{
+			name:      "property counter episode",
+			input:     "RPG不動産 12軒目.mp4",
+			wantTitle: "RPG不動産",
+			wantEp:    12,
+		},
+		{
+			name:      "diary counter episode",
+			input:     "転生したらスライムだった件 転スラ日記 1日記「魔物の町の住人達」.mp4",
+			wantTitle: "転生したらスライムだった件 転スラ日記",
+			wantEp:    1,
+			wantSub:   "魔物の町の住人達",
+		},
+		{
+			name:      "karte episode label",
+			input:     "僕の心のヤバイやつ karte12「僕は僕を知ってほしい」.mp4",
+			wantTitle: "僕の心のヤバイやつ",
+			wantEp:    12,
+			wantSub:   "僕は僕を知ってほしい",
+		},
+		{
+			name:      "mission episode label",
+			input:     "SPY×FAMILY MISSION：13「プロジェクト〈アップル〉」.mp4",
+			wantTitle: "SPY×FAMILY",
+			wantEp:    13,
+			wantSub:   "プロジェクト〈アップル〉",
+		},
+		{
+			name:      "level episode label",
+			input:     "弱キャラ友崎くん Lv．1「なんだかんだ言って」.mp4",
+			wantTitle: "弱キャラ友崎くん",
+			wantEp:    1,
+			wantSub:   "なんだかんだ言って",
+		},
+		{
+			name:      "roll episode label",
+			input:     "えんどろ~! ろ~る4「海と水着と邪神討伐~!」.mp4",
+			wantTitle: "えんどろ~!",
+			wantEp:    4,
+			wantSub:   "海と水着と邪神討伐~!",
+		},
 
 		// === Error cases ===
 		{
@@ -819,6 +880,11 @@ func TestParseFilename(t *testing.T) {
 		{
 			name:    "episode range with one trailing suffix is rejected",
 			input:   "TVアニメ『はたらく細胞』1～4話.mp4",
+			wantErr: true,
+		},
+		{
+			name:    "parenthesized episode range is rejected",
+			input:   "アニメ 舞妓さんちのまかないさん（1）～（3）.mp4",
 			wantErr: true,
 		},
 	}
