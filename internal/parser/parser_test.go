@@ -72,6 +72,7 @@ func TestParseFilename(t *testing.T) {
 		wantEp    int
 		wantSub   string
 		wantDate  time.Time
+		wantFinal bool
 		wantErr   bool
 	}{
 		// === Standard formats ===
@@ -681,6 +682,40 @@ func TestParseFilename(t *testing.T) {
 			wantSub:   "最終話",
 		},
 		{
+			name:      "numberless trailing subtitle",
+			input:     "[新]古見さんは、コミュ症です。「コミ４４ 冬の訪れです。 ほか」 (2022_04_07).mp4",
+			wantTitle: "古見さんは、コミュ症です。",
+			wantSub:   "コミ４４ 冬の訪れです。 ほか",
+		},
+		{
+			name:      "numberless final episode with subtitle",
+			input:     "あの日見た花の名前を僕達はまだ知らない。[終]最終話「あの夏に咲く花」 (2021_09_26).mp4",
+			wantTitle: "あの日見た花の名前を僕達はまだ知らない。",
+			wantSub:   "あの夏に咲く花",
+			wantFinal: true,
+		},
+		{
+			name:      "numberless final tag only",
+			input:     "それでも歩は寄せてくる[終] (2022_09_25).mp4",
+			wantTitle: "それでも歩は寄せてくる",
+			wantFinal: true,
+		},
+		{
+			name:      "pre-finale special is not the final episode",
+			input:     "もめんたりー・リリィ 最終回直前スペシャル#「」.mp4",
+			wantTitle: "もめんたりー・リリィ 最終回直前スペシャル#「」",
+		},
+		{
+			name:      "fully quoted work title is not a subtitle",
+			input:     "「作品」.mp4",
+			wantTitle: "作品",
+		},
+		{
+			name:      "quoted work name followed by other text is not a subtitle",
+			input:     "TVアニメ「ソードアート・オンライン」10th Anniversary COUNTDOWN！ (2022_07_02).mp4",
+			wantTitle: "「ソードアート・オンライン」10th Anniversary COUNTDOWN！",
+		},
+		{
 			name:      "bracketed title followed by final tag",
 			input:     "【推しの子】[終]#35 (20260326).mp4",
 			wantTitle: "【推しの子】",
@@ -934,6 +969,9 @@ func TestParseFilename(t *testing.T) {
 			}
 			if got.Subtitle != tt.wantSub {
 				t.Errorf("Subtitle = %q, want %q", got.Subtitle, tt.wantSub)
+			}
+			if got.FinalEpisode != tt.wantFinal {
+				t.Errorf("FinalEpisode = %v, want %v", got.FinalEpisode, tt.wantFinal)
 			}
 			if !tt.wantDate.IsZero() && !got.RecordedDate.Equal(tt.wantDate) {
 				t.Errorf("RecordedDate = %v, want %v", got.RecordedDate, tt.wantDate)

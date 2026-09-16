@@ -440,6 +440,88 @@ func TestProcessFileSkipsEpisodesForUnrelatedSearchResults(t *testing.T) {
 	}
 }
 
+func TestProcessFileResolvesNumberlessSubtitle(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/graphql" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[
+			{"node":{"annictId":1,"title":"作品","seasonName":"SPRING","seasonYear":2022,"episodesCount":3,"episodes":{"edges":[
+				{"node":{"annictId":101,"number":1,"sortNumber":1,"title":"はじまり"}},
+				{"node":{"annictId":102,"number":2,"sortNumber":2,"title":"再会"}},
+				{"node":{"annictId":103,"number":3,"sortNumber":3,"title":"旅立ち"}}
+			]}}}
+		]}}}`)
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "作品「再会」 (20220414).mp4")
+	if err := os.WriteFile(file, []byte("recording"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	client := annict.NewClientWithURLs("token", server.URL, server.URL+"/graphql")
+	result := processFile(
+		file,
+		client,
+		cache.NewDisabled(filepath.Join(dir, "cache")),
+		make(map[string][]annict.Work),
+		make(map[int][]annict.Episode),
+		make(map[programsCacheKey][]annict.Program),
+		make(map[string]string),
+		true,
+		false,
+		matcher.AutoRenameThreshold,
+		"",
+	)
+	if result.Error != nil || result.SkipReason != "" || !result.Previewed {
+		t.Fatalf("processFile() = %+v, want episode 2 preview", result)
+	}
+	if result.WorkTitle != "作品" || result.EpisodeNum != 2 {
+		t.Errorf("processFile() result = %+v, want 作品 episode 2", result)
+	}
+}
+
+func TestProcessFileSafelySkipsUnresolvedNumberlessSubtitle(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/graphql":
+			fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[]}}}`)
+		case "/works":
+			fmt.Fprint(w, `{"works":[]}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "作品「未知の回」 (20220414).mp4")
+	if err := os.WriteFile(file, []byte("recording"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	client := annict.NewClientWithURLs("token", server.URL, server.URL+"/graphql")
+	result := processFile(
+		file,
+		client,
+		cache.NewDisabled(filepath.Join(dir, "cache")),
+		make(map[string][]annict.Work),
+		make(map[int][]annict.Episode),
+		make(map[programsCacheKey][]annict.Program),
+		make(map[string]string),
+		true,
+		false,
+		matcher.AutoRenameThreshold,
+		"",
+	)
+	if result.Error != nil || result.SkipReason == "" || result.Previewed {
+		t.Fatalf("processFile() = %+v, want safe skip", result)
+	}
+}
+
 func TestProcessFileUsesDirectoryTitleAfterEmptyFilenameSearch(t *testing.T) {
 	graphqlRequests := 0
 	restWorkRequests := 0

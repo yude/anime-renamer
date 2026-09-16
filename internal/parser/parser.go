@@ -17,6 +17,7 @@ type RecordingMetadata struct {
 	EpisodeNumber int
 	Subtitle      string
 	RecordedDate  time.Time
+	FinalEpisode  bool
 }
 
 var (
@@ -83,11 +84,14 @@ var (
 	stageEpisodePattern         = regexp.MustCompile(`[sSｓＳ][tTｔＴ][aAａＡ][gGｇＧ][eEｅＥ][.．\s\x{3000}]*([0-9０-９]+)`)
 	reportEpisodePattern        = regexp.MustCompile(`(?:れぽーと|レポート)[.．\s\x{3000}]*([0-9０-９]+)`)
 
-	leadingBracketTagPattern = regexp.MustCompile(`^[\s]*【[^】]*】`)
-	leadingAngleTagPattern   = regexp.MustCompile(`^[\s]*＜[^＞]*＞`)
-	seasonQualifierPattern   = regexp.MustCompile(`^(?:第[0-9０-９]+(?:期|クール)[\s\x{3000}]*)+`)
-	leadingSimpleTagPattern  = regexp.MustCompile(`^[\s]*(?:\[字\]|\[新\]|\[再\]|\[無\]|\[多\]|\[SS\]|\[解\]|\[終\]|\[デ\]|\[双\])`)
-	trailingMetadataPattern  = regexp.MustCompile(`(?:\s*(?:\[(?:字|新|再|無|多|SS|解|終|デ|双)\]|【(?:ANiMAZiNG!!!|ＡＮｉＭＡＺｉＮＧ！！！|字幕|アニメギルド)】))+\s*$`)
+	leadingBracketTagPattern       = regexp.MustCompile(`^[\s]*【[^】]*】`)
+	leadingAngleTagPattern         = regexp.MustCompile(`^[\s]*＜[^＞]*＞`)
+	seasonQualifierPattern         = regexp.MustCompile(`^(?:第[0-9０-９]+(?:期|クール)[\s\x{3000}]*)+`)
+	leadingSimpleTagPattern        = regexp.MustCompile(`^[\s]*(?:\[字\]|\[新\]|\[再\]|\[無\]|\[多\]|\[SS\]|\[解\]|\[終\]|\[デ\]|\[双\])`)
+	trailingMetadataPattern        = regexp.MustCompile(`(?:\s*(?:\[(?:字|新|再|無|多|SS|解|終|デ|双)\]|【(?:ANiMAZiNG!!!|ＡＮｉＭＡＺｉＮＧ！！！|字幕|アニメギルド)】))+\s*$`)
+	finalEpisodeTagPattern         = regexp.MustCompile(`[\[［]終[\]］]`)
+	finalEpisodeSuffixPattern      = regexp.MustCompile(`[\s\x{3000}]*(?:最終話|最終回).*$`)
+	incompleteEpisodePrefixPattern = regexp.MustCompile(`(?:第[\s\x{3000}]*[0-9０-９]+|[#＃♯])[\s\x{3000}]*$`)
 
 	// Metadata tag patterns to strip from filenames (SCRename rp1 equivalent).
 	metadataTagPatterns = []*regexp.Regexp{
@@ -300,6 +304,7 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 	if strings.TrimSpace(name) == "" {
 		return nil, fmt.Errorf("empty filename: %q", filename)
 	}
+	finalEpisode := hasFinalEpisodeMarker(name)
 
 	// 2. Extract date from end
 	var recordedDate time.Time
@@ -435,8 +440,19 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 		} else {
 			subtitle = firstQuotedContent(afterEp)
 		}
-	} else {
-		// No episode marker found — no subtitle extraction
+	} else if title, trailingSubtitle, ok := trailingQuotedContent(name); ok {
+		// EPGs commonly omit the numeric episode label while retaining a
+		// trailing quoted subtitle. Keep that subtitle separate so the matcher
+		// can resolve it only when it identifies exactly one Annict episode.
+		name = title
+		subtitle = trailingSubtitle
+	}
+	if episodeNumber == 0 && finalEpisode {
+		// [終] is broadcast metadata rather than part of the work title. A
+		// textual 最終話/最終回 suffix serves the same purpose when no numeric
+		// episode marker is present.
+		name = strings.NewReplacer("[終]", "", "［終］", "").Replace(name)
+		name = finalEpisodeSuffixPattern.ReplaceAllString(name, "")
 	}
 
 	// 6. Extract work title: everything before the episode pattern
@@ -463,7 +479,73 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 		EpisodeNumber: episodeNumber,
 		Subtitle:      subtitle,
 		RecordedDate:  recordedDate,
+		FinalEpisode:  finalEpisode && episodeNumber == 0,
 	}, nil
+}
+
+func hasFinalEpisodeMarker(s string) bool {
+	if finalEpisodeTagPattern.MatchString(s) {
+		return true
+	}
+	for _, label := range []string{"最終話", "最終回"} {
+		for rest := s; ; {
+			index := strings.Index(rest, label)
+			if index < 0 {
+				break
+			}
+			after := strings.TrimSpace(rest[index+len(label):])
+			if !strings.HasPrefix(after, "直前") && !strings.HasPrefix(after, "目前") {
+				return true
+			}
+			rest = rest[index+len(label):]
+		}
+	}
+	return false
+}
+
+// trailingQuotedContent splits a final Japanese-quoted component from its
+// non-empty prefix. A fully quoted work title is deliberately left intact,
+// and quotes followed by other text are not mistaken for episode subtitles.
+func trailingQuotedContent(s string) (string, string, bool) {
+	runes := []rune(strings.TrimSpace(s))
+	type quote struct {
+		close rune
+	}
+	stack := make([]quote, 0, 2)
+	outerStart := -1
+	contentStart := -1
+	lastStart := -1
+	lastContentStart := -1
+	lastEnd := -1
+
+	for i, r := range runes {
+		if close, ok := japaneseQuoteClose(r); ok {
+			if len(stack) == 0 {
+				outerStart = i
+				contentStart = i + 1
+			}
+			stack = append(stack, quote{close: close})
+			continue
+		}
+		if len(stack) == 0 || r != stack[len(stack)-1].close {
+			continue
+		}
+		stack = stack[:len(stack)-1]
+		if len(stack) == 0 {
+			lastStart = outerStart
+			lastContentStart = contentStart
+			lastEnd = i
+		}
+	}
+
+	if lastStart < 0 || lastEnd != len(runes)-1 {
+		return "", "", false
+	}
+	prefix := strings.TrimSpace(string(runes[:lastStart]))
+	if prefix == "" || incompleteEpisodePrefixPattern.MatchString(prefix) {
+		return "", "", false
+	}
+	return prefix, strings.TrimSpace(string(runes[lastContentStart:lastEnd])), true
 }
 
 func firstQuotedContent(s string) string {

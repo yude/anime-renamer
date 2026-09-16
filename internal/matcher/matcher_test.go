@@ -962,6 +962,61 @@ func TestMatchMapsMissingNumberByUniqueSubtitleWithinWork(t *testing.T) {
 	}
 }
 
+func TestMatchMapsAbsentNumberByUniqueSubtitle(t *testing.T) {
+	works := []annict.Work{{ID: 1, Title: "作品", EpisodesCount: 3}}
+	episodes := map[int][]annict.Episode{1: {
+		{ID: 101, Number: float64Ptr(1), Title: "はじまり"},
+		{ID: 102, Number: float64Ptr(2), Title: "再会"},
+		{ID: 103, Number: float64Ptr(3), Title: "旅立ち"},
+	}}
+	meta := &parser.RecordingMetadata{WorkTitle: "作品", Subtitle: "再 会"}
+	result := Match(meta, works, episodes, nil)
+	if result == nil || result.Episode == nil || result.Episode.ID != 102 || result.Confidence < AutoRenameThreshold {
+		t.Errorf("Match() = %+v, want unique subtitle mapped to episode 2", result)
+	}
+}
+
+func TestMatchRejectsAbsentNumberWithDuplicateSubtitle(t *testing.T) {
+	works := []annict.Work{{ID: 1, Title: "作品", EpisodesCount: 2}}
+	episodes := map[int][]annict.Episode{1: {
+		{ID: 101, Number: float64Ptr(1), Title: "総集編"},
+		{ID: 102, Number: float64Ptr(2), Title: "総集編"},
+	}}
+	meta := &parser.RecordingMetadata{WorkTitle: "作品", Subtitle: "総集編"}
+	result := Match(meta, works, episodes, nil)
+	if result == nil || result.Episode != nil || result.Confidence >= AutoRenameThreshold {
+		t.Errorf("Match() = %+v, want ambiguous subtitle to remain unresolved", result)
+	}
+}
+
+func TestMatchMapsFinalMarkerOnlyFromCompleteEpisodeList(t *testing.T) {
+	works := []annict.Work{{ID: 1, Title: "作品", EpisodesCount: 4}}
+	episodes := map[int][]annict.Episode{1: {
+		{ID: 101, Number: float64Ptr(1), Title: "はじまり"},
+		{ID: 102, Number: float64Ptr(2), Title: "再会"},
+		{ID: 103, Number: float64Ptr(3), Title: "最終回"},
+		{ID: 199, Number: float64Ptr(4), NumberText: "OVA", Title: "番外編"},
+	}}
+	meta := &parser.RecordingMetadata{WorkTitle: "作品", FinalEpisode: true}
+	result := Match(meta, works, episodes, nil)
+	if result == nil || result.Episode == nil || result.Episode.ID != 103 || result.Confidence < AutoRenameThreshold {
+		t.Errorf("Match() = %+v, want complete work's final episode", result)
+	}
+}
+
+func TestMatchRejectsFinalMarkerWhenEpisodeListIsIncomplete(t *testing.T) {
+	works := []annict.Work{{ID: 1, Title: "作品", EpisodesCount: 3}}
+	episodes := map[int][]annict.Episode{1: {
+		{ID: 101, Number: float64Ptr(1), Title: "はじまり"},
+		{ID: 102, Number: float64Ptr(2), Title: "再会"},
+	}}
+	meta := &parser.RecordingMetadata{WorkTitle: "作品", FinalEpisode: true}
+	result := Match(meta, works, episodes, nil)
+	if result == nil || result.Episode != nil || result.Confidence >= AutoRenameThreshold {
+		t.Errorf("Match() = %+v, want incomplete list to remain unresolved", result)
+	}
+}
+
 func TestMatchDoesNotMapMissingNumberByDuplicateSubtitle(t *testing.T) {
 	works := []annict.Work{{ID: 1, Title: "作品"}}
 	episodes := map[int][]annict.Episode{1: {

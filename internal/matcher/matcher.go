@@ -250,6 +250,34 @@ func match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 	} else if meta.EpisodeNumber == 0 {
 		result.Confidence += 40
 		result.Reasons = append(result.Reasons, "work title match (no episode number in file)")
+
+		if meta.Subtitle != "" {
+			episode, matches := findUniqueEpisodeBySubtitle(meta.Subtitle, episodes)
+			if episode != nil {
+				result.Episode = episode
+				result.Confidence += 50
+				matchedNumber, _ := EpisodeNumber(episode)
+				result.Reasons = append(result.Reasons, fmt.Sprintf("unique subtitle matched Annict episode %d", matchedNumber))
+			} else if matches > 1 {
+				result.Reasons = append(result.Reasons, fmt.Sprintf("subtitle matched %d Annict episodes and is ambiguous", matches))
+			} else {
+				result.Reasons = append(result.Reasons, "subtitle did not exactly identify an Annict episode")
+			}
+		}
+
+		if result.Episode == nil && meta.FinalEpisode {
+			if episode := findFinalEpisode(work, episodes); episode != nil {
+				result.Episode = episode
+				result.Confidence += 50
+				matchedNumber, _ := EpisodeNumber(episode)
+				result.Reasons = append(result.Reasons, fmt.Sprintf("final-episode marker matched complete Annict episode %d", matchedNumber))
+				if episode.Title == "" {
+					result.FileSubtitle = meta.Subtitle
+				}
+			} else {
+				result.Reasons = append(result.Reasons, "final episode could not be identified from a complete Annict episode list")
+			}
+		}
 	}
 
 	// Step 3: Program date verification
@@ -268,6 +296,63 @@ func match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 	}
 
 	return result
+}
+
+// findUniqueEpisodeBySubtitle resolves a numberless recording only when the
+// strict subtitle identity key names exactly one positive-integer episode.
+// The broader scoring-only equivalences intentionally do not participate.
+func findUniqueEpisodeBySubtitle(subtitle string, episodes []annict.Episode) (*annict.Episode, int) {
+	var match *annict.Episode
+	matches := 0
+	for i := range episodes {
+		if _, ok := EpisodeNumber(&episodes[i]); !ok || episodes[i].Title == "" || !subtitlesEquivalent(episodes[i].Title, subtitle) {
+			continue
+		}
+		matches++
+		if match == nil {
+			match = &episodes[i]
+		}
+	}
+	if matches != 1 {
+		return nil, matches
+	}
+	return match, matches
+}
+
+// findFinalEpisode returns the uniquely highest positive-integer episode only
+// when Annict says the fetched list is complete. This avoids treating the
+// newest known episode of an incomplete or still-populating list as a finale.
+func findFinalEpisode(work annict.Work, episodes []annict.Episode) *annict.Episode {
+	if work.EpisodesCount <= 0 || len(episodes) < work.EpisodesCount {
+		return nil
+	}
+	var final *annict.Episode
+	maxNumber := 0
+	duplicateMax := false
+	for i := range episodes {
+		number, ok := EpisodeNumber(&episodes[i])
+		if !ok {
+			continue
+		}
+		numberText := normalize.Normalize(strings.TrimSpace(episodes[i].NumberText))
+		if numberText != "" && episodeNumberTextPattern.FindStringSubmatch(numberText) == nil && !kanjiEpisodeNumberTextPattern.MatchString(numberText) {
+			// Descriptive extras such as OVA or 総集編 can carry a numeric
+			// Number in Annict but are not evidence for the TV finale.
+			continue
+		}
+		switch {
+		case number > maxNumber:
+			maxNumber = number
+			final = &episodes[i]
+			duplicateMax = false
+		case number == maxNumber:
+			duplicateMax = true
+		}
+	}
+	if maxNumber == 0 || duplicateMax {
+		return nil
+	}
+	return final
 }
 
 // MatchingWorks returns the Annict works that can match the given parsed

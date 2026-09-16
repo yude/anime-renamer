@@ -181,10 +181,11 @@ func processFile(
 	fmt.Fprintf(os.Stderr, "  Parsed:    Work=%q Episode=%d Subtitle=%q Date=%s\n",
 		meta.WorkTitle, meta.EpisodeNumber, meta.Subtitle,
 		meta.RecordedDate.Format("2006-01-02"))
-	if meta.EpisodeNumber <= 0 {
+	numberlessRecovery := meta.EpisodeNumber <= 0
+	if meta.EpisodeNumber <= 0 && meta.Subtitle == "" && !meta.FinalEpisode {
 		return &renamer.RenameResult{
 			OriginalPath: file,
-			SkipReason:   fmt.Sprintf("no supported single episode number found in %q", baseName),
+			SkipReason:   fmt.Sprintf("no supported single episode number, subtitle, or final-episode marker found in %q", baseName),
 		}
 	}
 
@@ -215,6 +216,12 @@ func processFile(
 	}
 
 	if len(works) == 0 {
+		if numberlessRecovery {
+			return &renamer.RenameResult{
+				OriginalPath: file,
+				SkipReason:   fmt.Sprintf("numberless episode could not identify an Annict work for %q", meta.WorkTitle),
+			}
+		}
 		return &renamer.RenameResult{
 			OriginalPath: file,
 			Error:        fmt.Errorf("no works found for %q", meta.WorkTitle),
@@ -242,6 +249,12 @@ func processFile(
 	// candidate wastes one API request per rejected candidate.
 	result := matcher.Match(meta, works, episodesCache, nil)
 	if result == nil {
+		if numberlessRecovery {
+			return &renamer.RenameResult{
+				OriginalPath: file,
+				SkipReason:   fmt.Sprintf("numberless episode did not uniquely match %q", meta.WorkTitle),
+			}
+		}
 		return &renamer.RenameResult{
 			OriginalPath: file,
 			Error:        fmt.Errorf("no match found for %q", meta.WorkTitle),
@@ -317,6 +330,12 @@ func processFile(
 
 	// Step 6: Check confidence
 	if result.Confidence < confidenceThreshold {
+		if numberlessRecovery {
+			return &renamer.RenameResult{
+				OriginalPath: file,
+				SkipReason:   fmt.Sprintf("numberless episode confidence %d below threshold %d", result.Confidence, confidenceThreshold),
+			}
+		}
 		return &renamer.RenameResult{
 			OriginalPath: file,
 			Error:        fmt.Errorf("confidence %d below threshold %d", result.Confidence, confidenceThreshold),
