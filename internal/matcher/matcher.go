@@ -51,6 +51,10 @@ var subtitleOrthographyReplacer = strings.NewReplacer(
 	"柏田さんと太田君と海", "柏田さんと太田くんと海",
 	"魔物の町の住人達", "魔物の町の住人たち",
 	"街角ギャラクシー☆彡", "街角ギャラクシー",
+	"『自由』を", "自由",
+	"ビーナスライン／シェルター", "ビーナスライン・シェルター",
+	"呪館 JUKAN", "呪館",
+	"Chiidren's Echelon", "Children's Echelon",
 )
 
 // Season mapping from month to Annict season name. Each season is exactly
@@ -692,6 +696,9 @@ func subtitleStructuredPartMatch(a, b string) bool {
 	if subtitleSegmentSequenceMatch(a, b) || subtitleSegmentSequenceMatch(b, a) {
 		return true
 	}
+	if subtitleNumberedSegmentExpansionMatch(a, b) {
+		return true
+	}
 	if subtitleOtherSummaryMatch(a, b) || subtitleOtherSummaryMatch(b, a) {
 		return true
 	}
@@ -702,6 +709,45 @@ func subtitleStructuredPartMatch(a, b string) bool {
 		return true
 	}
 	return subtitleBracketPartMatch(a, b) || subtitleBracketPartMatch(b, a)
+}
+
+// subtitleNumberedSegmentExpansionMatch folds consecutive Japanese segment
+// labels that differ only by trailing Roman I/II/III. Some EPGs expand one
+// official segment into separately numbered mini-segments.
+func subtitleNumberedSegmentExpansionMatch(a, b string) bool {
+	left, leftChanged := collapseNumberedSubtitleSegments(subtitleSegments(a))
+	right, rightChanged := collapseNumberedSubtitleSegments(subtitleSegments(b))
+	if !leftChanged && !rightChanged || len(left) == 0 || len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func collapseNumberedSubtitleSegments(segments []string) ([]string, bool) {
+	result := make([]string, 0, len(segments))
+	changed := false
+	for _, segment := range segments {
+		runes := []rune(segment)
+		end := len(runes)
+		for end > 0 && end >= len(runes)-2 && runes[end-1] == 'i' {
+			end--
+		}
+		if end < len(runes) && end > 0 && unicode.In(runes[end-1], unicode.Han, unicode.Hiragana, unicode.Katakana) {
+			segment = string(runes[:end])
+			changed = true
+		}
+		if len(result) > 0 && result[len(result)-1] == segment {
+			changed = true
+			continue
+		}
+		result = append(result, segment)
+	}
+	return result, changed
 }
 
 // subtitleOtherSummaryMatch recognizes the explicit EPG convention where a

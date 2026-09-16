@@ -680,6 +680,10 @@ func TestMatchSubtitlePresentationVariantsReachThreshold(t *testing.T) {
 		{annict: "魔物の町の住人たち", file: "魔物の町の住人達"},
 		{annict: "街角ギャラクシー☆彡", file: "街角ギャラクシー"},
 		{annict: "日常パートめっちゃすこ〰〰♡♡♡", file: "日常パートめっちゃすこ~~~~~・・・"},
+		{annict: "『自由』を", file: "自由"},
+		{annict: "ビーナスライン・シェルター", file: "ビーナスライン／シェルター"},
+		{annict: "呪館 JUKAN", file: "呪館"},
+		{annict: "戦場の少年たち -The Children's Echelon-", file: "戦場の少年たち―The Chiidren's Echelon―"},
 	} {
 		episodes := map[int][]annict.Episode{1: {{ID: 100 + i, Number: float64Ptr(1), Title: tt.annict}}}
 		meta := &parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 1, Subtitle: tt.file}
@@ -687,6 +691,24 @@ func TestMatchSubtitlePresentationVariantsReachThreshold(t *testing.T) {
 		if result == nil || result.Confidence < AutoRenameThreshold {
 			t.Errorf("Match(%q, %q) = %+v, want confidence >= %d", tt.annict, tt.file, result, AutoRenameThreshold)
 		}
+	}
+}
+
+func TestMatchNumberedMiniSegmentsReachThreshold(t *testing.T) {
+	result := Match(
+		&parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 1, Subtitle: "任務と家族／子ども心I／子ども心II／目覚まし"},
+		[]annict.Work{{ID: 1, Title: "作品"}},
+		map[int][]annict.Episode{1: {{ID: 800, Number: float64Ptr(1), Title: "任務と家族／子ども心／目覚まし"}}},
+		nil,
+	)
+	if result == nil || result.Confidence < AutoRenameThreshold {
+		t.Errorf("Match() = %+v, want numbered mini-segments to reach %d", result, AutoRenameThreshold)
+	}
+}
+
+func TestNumberedMiniSegmentsDoNotFoldEnglishParts(t *testing.T) {
+	if subtitleNumberedSegmentExpansionMatch("Part I／Part II", "Part") {
+		t.Error("subtitleNumberedSegmentExpansionMatch folded English part labels")
 	}
 }
 
