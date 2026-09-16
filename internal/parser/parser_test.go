@@ -802,6 +802,12 @@ func TestParseFilename(t *testing.T) {
 			wantSub:   "プロジェクト〈アップル〉",
 		},
 		{
+			name:      "full width mission episode label",
+			input:     "ＳＰＹ×ＦＡＭＩＬＹ【ＭＩＳＳＩＯＮ：１６】ヨル'sキッチン.mp4",
+			wantTitle: "ＳＰＹ×ＦＡＭＩＬＹ",
+			wantEp:    16,
+		},
+		{
 			name:      "level episode label",
 			input:     "弱キャラ友崎くん Lv．1「なんだかんだ言って」.mp4",
 			wantTitle: "弱キャラ友崎くん",
@@ -814,6 +820,20 @@ func TestParseFilename(t *testing.T) {
 			wantTitle: "えんどろ~!",
 			wantEp:    4,
 			wantSub:   "海と水着と邪神討伐~!",
+		},
+		{
+			name:      "stage episode label",
+			input:     "宇宙よりも遠い場所 STAGE01「青春しゃくまんえん」.mp4",
+			wantTitle: "宇宙よりも遠い場所",
+			wantEp:    1,
+			wantSub:   "青春しゃくまんえん",
+		},
+		{
+			name:      "report episode label",
+			input:     "放課後ていぼう日誌 れぽーと05「潮干狩りと顧問」.mp4",
+			wantTitle: "放課後ていぼう日誌",
+			wantEp:    5,
+			wantSub:   "潮干狩りと顧問",
 		},
 
 		// === Error cases ===

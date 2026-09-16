@@ -76,9 +76,11 @@ var (
 	counterEpisodePattern       = regexp.MustCompile(`([0-9０-９]+)[\s\x{3000}]*(?:時限目|軒目|日記)`)
 	kanjiVolumeEpisodePattern   = regexp.MustCompile(`([〇一二三四五六七八九十百千壱弐参肆伍陸漆捌玖拾]+)[\s\x{3000}]*の巻`)
 	karteEpisodePattern         = regexp.MustCompile(`(?i)karte[.．\s\x{3000}]*([0-9０-９]+)`)
-	missionEpisodePattern       = regexp.MustCompile(`(?i)mission[：:.．\s\x{3000}]*([0-9０-９]+)`)
+	missionEpisodePattern       = regexp.MustCompile(`[【\[]?[mMｍＭ][iIｉＩ][sSｓＳ][sSｓＳ][iIｉＩ][oOｏＯ][nNｎＮ][：:.．\s\x{3000}]*([0-9０-９]+)[】\]]?`)
 	levelEpisodePattern         = regexp.MustCompile(`(?i)lv[.．][\s\x{3000}]*([0-9０-９]+)`)
 	rollEpisodePattern          = regexp.MustCompile(`ろ[~〜～ー]る[\s\x{3000}]*([0-9０-９]+)`)
+	stageEpisodePattern         = regexp.MustCompile(`[sSｓＳ][tTｔＴ][aAａＡ][gGｇＧ][eEｅＥ][.．\s\x{3000}]*([0-9０-９]+)`)
+	reportEpisodePattern        = regexp.MustCompile(`(?:れぽーと|レポート)[.．\s\x{3000}]*([0-9０-９]+)`)
 
 	leadingBracketTagPattern = regexp.MustCompile(`^[\s]*【[^】]*】`)
 	leadingAngleTagPattern   = regexp.MustCompile(`^[\s]*＜[^＞]*＞`)
@@ -343,6 +345,8 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 		missionEpisodePattern,
 		levelEpisodePattern,
 		rollEpisodePattern,
+		stageEpisodePattern,
+		reportEpisodePattern,
 	}
 	if m := earliestEpisodeMatch(name, decimalPatterns...); m != nil {
 		parsedNumber, err := decimalEpisodeNumber(name[m[2]:m[3]])
