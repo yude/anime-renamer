@@ -133,6 +133,9 @@ func NormalizeTitleForMatch(s string) string {
 	if key == "ラブライブ!" {
 		return NormalizeTitleForMatch("ラブライブ！ School idol project")
 	}
+	if key == "ツルネ風舞高校弓道部アンコール" {
+		return NormalizeTitleForMatch("ツルネ ―風舞高校弓道部―")
+	}
 	return key
 }
 

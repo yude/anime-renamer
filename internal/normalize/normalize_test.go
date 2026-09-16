@@ -95,6 +95,9 @@ func TestNormalizeTitleForMatch(t *testing.T) {
 		{a: "アニメ・アオノハコ", b: "アオのハコ", eq: true},
 		{a: "アイドルマスター", b: "THE IDOLM@STER", eq: true},
 		{a: "ラブライブ！", b: "ラブライブ！ School idol project", eq: true},
+		{a: "チ。 —地球の運動について—", b: "チ。 ―地球の運動について―", eq: true},
+		{a: "ラブライブ！スーパースター！！ ２期", b: "ラブライブ！スーパースター!! 2期", eq: true},
+		{a: "ツルネ―風舞高校弓道部―アンコール", b: "ツルネ ―風舞高校弓道部―", eq: true},
 		{a: "けいおん！", b: "けいおん！！", eq: false},
 		{a: "作品 第2期", b: "作品 第3期", eq: false},
 	} {
