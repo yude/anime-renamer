@@ -263,6 +263,7 @@ func processFile(
 		meta.RecordedDate.Format("2006-01-02"))
 	numberlessRecovery := meta.EpisodeNumber <= 0
 	dateOnlyRecovery := isDateOnlyRecoveryCandidate(meta)
+	dateBackedRecovery := isDateBackedRecoveryCandidate(meta)
 	if meta.EpisodeNumber <= 0 && meta.Subtitle == "" && !meta.FinalEpisode && !dateOnlyRecovery {
 		return &renamer.RenameResult{
 			OriginalPath: file,
@@ -315,7 +316,7 @@ func processFile(
 	// only date-only candidates and numbered files that can serve as batch
 	// anchors, leaving unrelated numbered paths on their existing cache flow.
 	needsAnchorMetadata := runtime != nil && runtime.batchSchedule != nil && runtime.batchSchedule.wantsAnchors(meta.WorkTitle, works[0].Title)
-	if (dateOnlyRecovery || needsAnchorMetadata) && len(works) == 1 && works[0].SyobocalTID == "" {
+	if (dateBackedRecovery || needsAnchorMetadata) && len(works) == 1 && works[0].SyobocalTID == "" {
 		originalWork := works[0]
 		refreshed, refreshErr := refreshWorkMetadata(client, c, meta.WorkTitle, workCache, episodesCache)
 		if refreshErr != nil && dateOnlyRecovery {
@@ -369,6 +370,34 @@ func processFile(
 		}
 	} else {
 		result = matcher.Match(meta, works, episodesCache, nil)
+		if dateBackedRecovery && (result == nil || result.Episode == nil || result.Confidence < matcher.AutoRenameThreshold) {
+			var scheduleClient syobocalProgramClient
+			var batchSchedule *batchScheduleContext
+			if runtime != nil {
+				scheduleClient = runtime.syobocalClient
+				batchSchedule = runtime.batchSchedule
+			}
+			if dateResult, dateErr := matchDateOnly(meta, works, episodesCache, c, scheduleClient, batchSchedule); dateErr == nil {
+				result = dateResult
+			} else if result != nil {
+				if len(works) == 1 {
+					relatedWorks, relatedErr := searchRelatedWorks(client, c, meta.WorkTitle, workCache, episodesCache)
+					if relatedErr == nil {
+						if relatedResult, relatedDateErr := matchDateBackedRelated(meta, relatedWorks, episodesCache, c, scheduleClient); relatedDateErr == nil {
+							result = relatedResult
+							dateErr = nil
+						} else {
+							dateErr = fmt.Errorf("%v; related works: %w", dateErr, relatedDateErr)
+						}
+					} else {
+						dateErr = fmt.Errorf("%v; search related works: %w", dateErr, relatedErr)
+					}
+				}
+				if dateErr != nil {
+					result.Reasons = append(result.Reasons, fmt.Sprintf("date-backed subtitle recovery failed: %v", dateErr))
+				}
+			}
+		}
 	}
 	if result == nil {
 		if numberlessRecovery {
@@ -512,7 +541,11 @@ func processFile(
 }
 
 func isDateOnlyRecoveryCandidate(meta *parser.RecordingMetadata) bool {
-	if meta == nil || meta.EpisodeNumber > 0 || meta.Subtitle != "" || meta.FinalEpisode || meta.RecordedDate.IsZero() {
+	return isDateBackedRecoveryCandidate(meta) && meta.Subtitle == ""
+}
+
+func isDateBackedRecoveryCandidate(meta *parser.RecordingMetadata) bool {
+	if meta == nil || meta.EpisodeNumber > 0 || meta.FinalEpisode || meta.RecordedDate.IsZero() {
 		return false
 	}
 	title := normalize.Normalize(meta.WorkTitle)
@@ -527,7 +560,9 @@ func isDateOnlyRecoveryCandidate(meta *parser.RecordingMetadata) bool {
 // prioritizeDateOnlyFiles keeps each group stable but places explicit
 // episode identities first. That guarantees channel anchors are available to
 // every date-only candidate and gives explicit recordings first claim on a
-// duplicate destination.
+// duplicate destination. Subtitle-bearing recovery candidates do not request
+// anchors: doing so would add schedule lookups for every numbered recording
+// in the same work merely to support one fallback.
 func prioritizeDateOnlyFiles(files []string) ([]string, *batchScheduleContext) {
 	batch := newBatchScheduleContext()
 	dateOnly := make([]bool, len(files))
@@ -613,10 +648,10 @@ func matchDateOnly(meta *parser.RecordingMetadata, works []annict.Work, episodes
 		return nil, err
 	}
 
-	episode, reason := dateinfer.ResolveUnique(meta.RecordedDate, episodesByWork[work.ID], programs)
+	episode, reason := dateinfer.ResolveUniqueWithSubtitle(meta.RecordedDate, episodesByWork[work.ID], programs, meta.Subtitle)
 	if episode == nil {
 		if channelID, anchors, ok := batch.trustedChannel(work.ID); ok {
-			if channelEpisode, channelReason := dateinfer.ResolveForChannel(meta.RecordedDate, episodesByWork[work.ID], programs, channelID); channelEpisode != nil {
+			if channelEpisode, channelReason := dateinfer.ResolveForChannelWithSubtitle(meta.RecordedDate, episodesByWork[work.ID], programs, channelID, meta.Subtitle); channelEpisode != nil {
 				episode = channelEpisode
 				reason = fmt.Sprintf("%s using %d consistent batch anchors", channelReason, anchors)
 			} else {
@@ -634,6 +669,71 @@ func matchDateOnly(meta *parser.RecordingMetadata, works []annict.Work, episodes
 		Reasons: []string{
 			"work title uniquely matched Annict",
 			reason,
+		},
+	}, nil
+}
+
+func matchDateBackedRelated(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork map[int][]annict.Episode, c *cache.Cache, client syobocalProgramClient) (*matcher.MatchResult, error) {
+	if client == nil {
+		return nil, fmt.Errorf("syobocal client is unavailable")
+	}
+	type resolvedWork struct {
+		work    annict.Work
+		episode *annict.Episode
+		reason  string
+	}
+	var resolved []resolvedWork
+	var unresolved []string
+	compatibleWorks := 0
+	for _, work := range works {
+		compatible := false
+		for i := range episodesByWork[work.ID] {
+			if episodesByWork[work.ID][i].Title != "" && matcher.DateProvenSubtitleMatch(episodesByWork[work.ID][i].Title, meta.Subtitle) {
+				compatible = true
+				break
+			}
+		}
+		if !compatible {
+			continue
+		}
+		compatibleWorks++
+		tid, err := strconv.Atoi(work.SyobocalTID)
+		if err != nil || tid <= 0 {
+			unresolved = append(unresolved, fmt.Sprintf("%q has no valid Syobocal TID", work.Title))
+			continue
+		}
+		programs, err := getSyobocalPrograms(c, client, tid, meta.RecordedDate)
+		if err != nil {
+			unresolved = append(unresolved, fmt.Sprintf("%q schedule lookup failed: %v", work.Title, err))
+			continue
+		}
+		if !dateinfer.HasUsableSchedule(meta.RecordedDate, programs) {
+			continue
+		}
+		episode, reason := dateinfer.ResolveUniqueWithSubtitle(meta.RecordedDate, episodesByWork[work.ID], programs, meta.Subtitle)
+		if episode == nil {
+			unresolved = append(unresolved, fmt.Sprintf("%q: %s", work.Title, reason))
+			continue
+		}
+		resolved = append(resolved, resolvedWork{work: work, episode: episode, reason: reason})
+	}
+	if compatibleWorks == 0 {
+		return nil, fmt.Errorf("no related work has a compatible official subtitle")
+	}
+	if len(unresolved) > 0 {
+		return nil, fmt.Errorf("related work candidates remain unverified: %s", strings.Join(unresolved, "; "))
+	}
+	if len(resolved) != 1 {
+		return nil, fmt.Errorf("date and subtitle resolved %d related works", len(resolved))
+	}
+	match := resolved[0]
+	return &matcher.MatchResult{
+		Work:       &match.work,
+		Episode:    match.episode,
+		Confidence: matcher.AutoRenameThreshold,
+		Reasons: []string{
+			"related work title and date-proven subtitle matched",
+			match.reason,
 		},
 	}, nil
 }

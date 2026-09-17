@@ -88,6 +88,32 @@ func TestResolveForChannelDisambiguatesDifferentCounts(t *testing.T) {
 	}
 }
 
+func TestResolveUniqueWithCompositeSubtitlePart(t *testing.T) {
+	jst := time.FixedZone("JST", 9*60*60)
+	date := time.Date(2022, 4, 7, 0, 0, 0, 0, jst)
+	episodes := []annict.Episode{{ID: 101, Number: number(1), Title: "冬の訪れです。／不良です。"}}
+	programs := []syobocal.Program{{PID: 1, Count: 1, ChannelID: 5, StartedAt: date.Add(time.Hour), Subtitle: "冬の訪れです。"}}
+
+	episode, reason := ResolveUniqueWithSubtitle(date, episodes, programs, "コミュ４４ 冬の訪れです。")
+	if episode == nil || episode.ID != 101 || !strings.Contains(reason, "Annict episode title") {
+		t.Fatalf("ResolveUniqueWithSubtitle() = %+v, %q; want episode 101 with composite evidence", episode, reason)
+	}
+}
+
+func TestResolveUniqueWithCompositeSubtitlePartFailsClosed(t *testing.T) {
+	jst := time.FixedZone("JST", 9*60*60)
+	date := time.Date(2022, 4, 7, 0, 0, 0, 0, jst)
+	episodes := []annict.Episode{{ID: 101, Number: number(1), Title: "決戦（前編）／帰還"}}
+	base := syobocal.Program{PID: 1, Count: 1, ChannelID: 5, StartedAt: date.Add(time.Hour), Subtitle: "決戦（前編）"}
+
+	for _, subtitle := range []string{"決戦", "決戦（後編）", "未知の回"} {
+		episode, reason := ResolveUniqueWithSubtitle(date, episodes, []syobocal.Program{base}, subtitle)
+		if episode != nil || !strings.Contains(reason, "filename subtitle") {
+			t.Errorf("ResolveUniqueWithSubtitle(%q) = %+v, %q; want safe rejection", subtitle, episode, reason)
+		}
+	}
+}
+
 func TestAnchorChannel(t *testing.T) {
 	jst := time.FixedZone("JST", 9*60*60)
 	date := time.Date(2022, 8, 21, 0, 0, 0, 0, jst)

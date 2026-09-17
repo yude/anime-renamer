@@ -653,6 +653,39 @@ func TestSubtitlesEquivalentStripsKomiSegmentNumber(t *testing.T) {
 	}
 }
 
+func TestCompositeSubtitlePartMatch(t *testing.T) {
+	for _, tt := range []struct {
+		name               string
+		complete, observed string
+		want               bool
+	}{
+		{name: "one complete part", complete: "一つ目です。／二つ目です。／三つ目です。", observed: "二つ目です。", want: true},
+		{name: "contiguous complete parts", complete: "一つ目です。／二つ目です。／三つ目です。", observed: "一つ目です。／二つ目です。", want: true},
+		{name: "Komi segment label", complete: "冬の訪れです。／不良です。", observed: "コミュ４４ 冬の訪れです。", want: true},
+		{name: "generic substring", complete: "決戦（前編）／帰還", observed: "決戦", want: false},
+		{name: "meaningful qualifier differs", complete: "決戦（前編）／帰還", observed: "決戦（後編）", want: false},
+		{name: "noncontiguous parts", complete: "一つ目です。／二つ目です。／三つ目です。", observed: "一つ目です。／三つ目です。", want: false},
+		{name: "ordinary punctuation is not a delimiter", complete: "出会い、そして別れ", observed: "出会い", want: false},
+		{name: "short part is insufficient", complete: "A／長い題名", observed: "A", want: false},
+		{name: "whole title is not partial", complete: "一つ目です。／二つ目です。", observed: "一つ目です。／二つ目です。", want: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := CompositeSubtitlePartMatch(tt.complete, tt.observed); got != tt.want {
+				t.Errorf("CompositeSubtitlePartMatch(%q, %q) = %v, want %v", tt.complete, tt.observed, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDateProvenSubtitleMatchAcceptsExplicitOtherSummary(t *testing.T) {
+	if !DateProvenSubtitleMatch("冬の訪れです。／不良です。", "コミュ４４ 冬の訪れです。 ほか") {
+		t.Fatal("DateProvenSubtitleMatch should accept a complete leading part with an explicit other-summary marker")
+	}
+	if DateProvenSubtitleMatch("決戦（後編）／帰還", "決戦（前編）ほか") {
+		t.Fatal("DateProvenSubtitleMatch accepted a meaningfully different summarized part")
+	}
+}
+
 func TestMatchSubtitlePresentationVariantsReachThreshold(t *testing.T) {
 	works := []annict.Work{{ID: 1, Title: "作品"}}
 	for i, tt := range []struct {

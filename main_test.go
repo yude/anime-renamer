@@ -722,6 +722,109 @@ func TestProcessFileResolvesDateOnlyFromUniqueSyobocalSchedule(t *testing.T) {
 	}
 }
 
+func TestProcessFileResolvesCompositeSubtitlePartFromUniqueDate(t *testing.T) {
+	annictServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/graphql" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[
+			{"node":{"annictId":1,"title":"作品","syobocalTid":6373,"episodesCount":1,"episodes":{"edges":[
+				{"node":{"annictId":101,"number":1,"sortNumber":1,"title":"冬の訪れです。／不良です。"}}
+			]}}}
+		]}}}`)
+	}))
+	defer annictServer.Close()
+
+	syobocalServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<ProgLookupResponse><ProgItems><ProgItem><PID>10</PID><TID>6373</TID><StTime>2022-04-07 01:00:00</StTime><EdTime>2022-04-07 01:30:00</EdTime><Count>1</Count><Deleted>0</Deleted><Warn>0</Warn><ChID>5</ChID><STSubTitle>冬の訪れです。</STSubTitle></ProgItem></ProgItems><Result><Code>200</Code></Result></ProgLookupResponse>`)
+	}))
+	defer syobocalServer.Close()
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "作品「コミュ４４ 冬の訪れです。」 (20220407).mp4")
+	if err := os.WriteFile(file, []byte("recording"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result := processFile(
+		file,
+		annict.NewClientWithURLs("token", annictServer.URL, annictServer.URL+"/graphql"),
+		cache.NewDisabled(filepath.Join(dir, "cache")),
+		make(map[string][]annict.Work),
+		make(map[int][]annict.Episode),
+		make(map[programsCacheKey][]annict.Program),
+		make(map[string]string),
+		true,
+		false,
+		matcher.AutoRenameThreshold,
+		"",
+		&processingContext{syobocalClient: syobocal.NewClientWithBaseURL(syobocalServer.URL)},
+	)
+	if result.Error != nil || result.SkipReason != "" || !result.Previewed || result.EpisodeNum != 1 {
+		t.Fatalf("processFile() = %+v, want date-proven composite subtitle episode 1", result)
+	}
+}
+
+func TestProcessFileResolvesCompositeSubtitleInExactlyOneRelatedWork(t *testing.T) {
+	graphqlRequests := 0
+	annictServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/graphql" {
+			http.NotFound(w, r)
+			return
+		}
+		graphqlRequests++
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[
+			{"node":{"annictId":1,"title":"作品","syobocalTid":100,"episodesCount":1,"episodes":{"edges":[
+				{"node":{"annictId":101,"number":1,"sortNumber":1,"title":"冬の訪れです。／旧作です。"}}
+			]}}},
+			{"node":{"annictId":2,"title":"作品 第2期","syobocalTid":200,"episodesCount":1,"episodes":{"edges":[
+				{"node":{"annictId":201,"number":1,"sortNumber":1,"title":"冬の訪れです。／不良です。"}}
+			]}}}
+		]}}}`)
+	}))
+	defer annictServer.Close()
+
+	syobocalServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("TID") {
+		case "100":
+			fmt.Fprint(w, `<ProgLookupResponse><ProgItems></ProgItems><Result><Code>200</Code></Result></ProgLookupResponse>`)
+		case "200":
+			fmt.Fprint(w, `<ProgLookupResponse><ProgItems><ProgItem><PID>20</PID><TID>200</TID><StTime>2022-04-07 01:00:00</StTime><EdTime>2022-04-07 01:30:00</EdTime><Count>1</Count><Deleted>0</Deleted><Warn>0</Warn><ChID>5</ChID><STSubTitle>冬の訪れです。</STSubTitle></ProgItem></ProgItems><Result><Code>200</Code></Result></ProgLookupResponse>`)
+		default:
+			t.Errorf("unexpected Syobocal TID %q", r.URL.Query().Get("TID"))
+		}
+	}))
+	defer syobocalServer.Close()
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "作品「冬の訪れです。」 (20220407).mp4")
+	if err := os.WriteFile(file, []byte("recording"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result := processFile(
+		file,
+		annict.NewClientWithURLs("token", annictServer.URL, annictServer.URL+"/graphql"),
+		cache.NewDisabled(filepath.Join(dir, "cache")),
+		make(map[string][]annict.Work),
+		make(map[int][]annict.Episode),
+		make(map[programsCacheKey][]annict.Program),
+		make(map[string]string),
+		true,
+		false,
+		matcher.AutoRenameThreshold,
+		"",
+		&processingContext{syobocalClient: syobocal.NewClientWithBaseURL(syobocalServer.URL)},
+	)
+	if result.Error != nil || result.SkipReason != "" || !result.Previewed || result.WorkTitle != "作品 第2期" || result.EpisodeNum != 1 {
+		t.Fatalf("processFile() = %+v, want uniquely date-proven related-work episode", result)
+	}
+	if graphqlRequests != 2 {
+		t.Errorf("GraphQL requests = %d, want initial search plus related-work search", graphqlRequests)
+	}
+}
+
 func TestProcessFileDateOnlyScheduleAmbiguityIsSafeSkip(t *testing.T) {
 	annictServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

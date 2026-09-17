@@ -804,6 +804,54 @@ func subtitlesEquivalent(a, b string) bool {
 	return na != "" && nb != "" && na == nb
 }
 
+// DateProvenSubtitleMatch is the subtitle gate for an episode whose identity
+// will also be proven independently by schedule date and episode number.
+func DateProvenSubtitleMatch(complete, observed string) bool {
+	return subtitlesEquivalent(complete, observed) ||
+		CompositeSubtitlePartMatch(complete, observed) ||
+		subtitleOtherSummaryMatch(observed, complete)
+}
+
+// CompositeSubtitlePartMatch reports whether observed is a contiguous set of
+// complete slash-delimited parts from complete. It is deliberately narrower
+// than generic substring matching and is intended only for callers that have
+// already established the episode identity independently (for example from a
+// date and schedule episode number).
+func CompositeSubtitlePartMatch(complete, observed string) bool {
+	completeParts := slashSubtitleParts(complete)
+	observedParts := slashSubtitleParts(observed)
+	if len(completeParts) < 2 || len(observedParts) == 0 || len(observedParts) >= len(completeParts) {
+		return false
+	}
+	if utf8.RuneCountInString(strings.Join(observedParts, "")) < 3 {
+		return false
+	}
+	for offset := 0; offset+len(observedParts) <= len(completeParts); offset++ {
+		matched := true
+		for i := range observedParts {
+			if completeParts[offset+i] != observedParts[i] {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
+func slashSubtitleParts(s string) []string {
+	raw := strings.FieldsFunc(s, func(r rune) bool { return r == '/' || r == '／' })
+	parts := make([]string, 0, len(raw))
+	for _, part := range raw {
+		if key := subtitleScoringKey(part); key != "" {
+			parts = append(parts, key)
+		}
+	}
+	return parts
+}
+
 func subtitleIdentityKey(s string) string {
 	key := normalize.NormalizeSubtitleForMatch(s)
 	return subtitleEpisodeLabelPrefix.ReplaceAllString(key, "")
