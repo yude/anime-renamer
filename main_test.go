@@ -794,6 +794,80 @@ func TestProcessFileUsesDateToSelectRelatedSeason(t *testing.T) {
 	}
 }
 
+func TestProcessFileUsesDateAndNumberToSelectAmbiguousRemake(t *testing.T) {
+	annictServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/graphql" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[
+			{"node":{"annictId":1,"title":"作品","seasonName":"SPRING","seasonYear":1969,"syobocalTid":100,"episodesCount":1,"episodes":{"edges":[
+				{"node":{"annictId":101,"number":17,"numberText":"第17話","sortNumber":1700,"title":"旧作"}}
+			]}}},
+			{"node":{"annictId":2,"title":"作品","seasonName":"WINTER","seasonYear":2019,"syobocalTid":200,"episodesCount":1,"episodes":{"edges":[
+				{"node":{"annictId":201,"number":17,"numberText":"第17話","sortNumber":1700,"title":"問答の巻"}}
+			]}}}
+		]}}}`)
+	}))
+	defer annictServer.Close()
+
+	syobocalServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Query().Get("TID") {
+		case "100":
+			fmt.Fprint(w, `<ProgLookupResponse><ProgItems></ProgItems><Result><Code>200</Code></Result></ProgLookupResponse>`)
+		case "200":
+			fmt.Fprint(w, `<ProgLookupResponse><ProgItems><ProgItem><PID>20</PID><TID>200</TID><StTime>2019-05-07 01:00:00</StTime><EdTime>2019-05-07 01:30:00</EdTime><Count>17</Count><Deleted>0</Deleted><Warn>0</Warn><ChID>5</ChID><STSubTitle>問答の巻</STSubTitle></ProgItem></ProgItems><Result><Code>200</Code></Result></ProgLookupResponse>`)
+		default:
+			t.Errorf("unexpected Syobocal TID %q", r.URL.Query().Get("TID"))
+		}
+	}))
+	defer syobocalServer.Close()
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "作品 第十七話 (2019_05_07).mp4")
+	if err := os.WriteFile(file, []byte("recording"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result := processFile(
+		file,
+		annict.NewClientWithURLs("token", annictServer.URL, annictServer.URL+"/graphql"),
+		cache.NewDisabled(filepath.Join(dir, "cache")),
+		make(map[string][]annict.Work),
+		make(map[int][]annict.Episode),
+		make(map[programsCacheKey][]annict.Program),
+		make(map[string]string),
+		true,
+		false,
+		matcher.AutoRenameThreshold,
+		"",
+		&processingContext{syobocalClient: syobocal.NewClientWithBaseURL(syobocalServer.URL)},
+	)
+	if result.Error != nil || result.SkipReason != "" || !result.Previewed || result.WorkTitle != "作品" || result.EpisodeNum != 17 || result.Subtitle != "問答の巻" {
+		t.Fatalf("processFile() = %+v, want date-and-number-proven remake episode 17", result)
+	}
+}
+
+func TestMatchNumberedDateAcrossWorksRejectsMultipleProofs(t *testing.T) {
+	syobocalServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tid := r.URL.Query().Get("TID")
+		fmt.Fprintf(w, `<ProgLookupResponse><ProgItems><ProgItem><PID>%s</PID><TID>%s</TID><StTime>2019-05-07 01:00:00</StTime><EdTime>2019-05-07 01:30:00</EdTime><Count>17</Count><Deleted>0</Deleted><Warn>0</Warn><ChID>5</ChID></ProgItem></ProgItems><Result><Code>200</Code></Result></ProgLookupResponse>`, tid, tid)
+	}))
+	defer syobocalServer.Close()
+
+	meta := &parser.RecordingMetadata{EpisodeNumber: 17, RecordedDate: time.Date(2019, 5, 7, 0, 0, 0, 0, time.FixedZone("JST", 9*60*60))}
+	works := []annict.Work{{ID: 1, Title: "作品", SyobocalTID: "100"}, {ID: 2, Title: "作品", SyobocalTID: "200"}}
+	number1, number2 := 17.0, 17.0
+	episodes := map[int][]annict.Episode{
+		1: {{ID: 101, Number: &number1}},
+		2: {{ID: 201, Number: &number2}},
+	}
+	result, err := matchNumberedDateAcrossWorks(meta, works, episodes, cache.NewDisabled(filepath.Join(t.TempDir(), "cache")), syobocal.NewClientWithBaseURL(syobocalServer.URL))
+	if err == nil || result != nil || !strings.Contains(err.Error(), "resolved 2 works") {
+		t.Fatalf("matchNumberedDateAcrossWorks() = %+v, %v; want safe ambiguity rejection", result, err)
+	}
+}
+
 func TestProcessFileResolvesCompositeSubtitlePartFromUniqueDate(t *testing.T) {
 	annictServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/graphql" {

@@ -410,6 +410,19 @@ func processFile(
 		}
 	} else {
 		result = matcher.Match(meta, works, episodesCache, nil)
+		if meta.EpisodeNumber > 0 && meta.Subtitle == "" && !meta.RecordedDate.IsZero() && len(works) > 1 &&
+			(result == nil || result.Episode == nil || result.Confidence < matcher.AutoRenameThreshold) {
+			var scheduleClient syobocalProgramClient
+			if runtime != nil {
+				scheduleClient = runtime.syobocalClient
+			}
+			if dateResult, dateErr := matchNumberedDateAcrossWorks(meta, works, episodesCache, c, scheduleClient); dateErr == nil {
+				result = dateResult
+				fmt.Fprintf(os.Stderr, "  Fallback:  date and episode number uniquely identified an Annict work\n")
+			} else if result != nil {
+				result.Reasons = append(result.Reasons, fmt.Sprintf("numbered date disambiguation failed: %v", dateErr))
+			}
+		}
 		if dateBackedRecovery && (result == nil || result.Episode == nil || result.Confidence < matcher.AutoRenameThreshold) {
 			var scheduleClient syobocalProgramClient
 			var batchSchedule *batchScheduleContext
@@ -774,6 +787,66 @@ func matchDateOnlyAcrossWorks(meta *parser.RecordingMetadata, works []annict.Wor
 		Confidence: matcher.AutoRenameThreshold,
 		Reasons: []string{
 			"related work title and date uniquely matched",
+			match.reason,
+		},
+	}, nil
+}
+
+func matchNumberedDateAcrossWorks(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork map[int][]annict.Episode, c *cache.Cache, client syobocalProgramClient) (*matcher.MatchResult, error) {
+	if meta.EpisodeNumber <= 0 || meta.RecordedDate.IsZero() {
+		return nil, errors.New("episode number or recording date is missing")
+	}
+	if len(works) < 2 {
+		return nil, errors.New("multiple Annict work candidates are required")
+	}
+	if client == nil {
+		return nil, errors.New("syobocal client is unavailable")
+	}
+
+	type resolvedWork struct {
+		work    annict.Work
+		episode *annict.Episode
+		reason  string
+	}
+	resolved := make([]resolvedWork, 0, 1)
+	var unresolved []string
+	for _, work := range works {
+		tid, err := strconv.Atoi(work.SyobocalTID)
+		if err != nil || tid <= 0 {
+			unresolved = append(unresolved, fmt.Sprintf("%q has no valid Syobocal TID", work.Title))
+			continue
+		}
+		programs, err := getSyobocalPrograms(c, client, tid, meta.RecordedDate)
+		if err != nil {
+			unresolved = append(unresolved, fmt.Sprintf("%q schedule lookup failed: %v", work.Title, err))
+			continue
+		}
+		episode, reason := dateinfer.ResolveUnique(meta.RecordedDate, episodesByWork[work.ID], programs)
+		if episode == nil {
+			if dateinfer.HasUsableSchedule(meta.RecordedDate, programs) {
+				unresolved = append(unresolved, fmt.Sprintf("%q: %s", work.Title, reason))
+			}
+			continue
+		}
+		number, ok := matcher.EpisodeNumber(episode)
+		if !ok || number != meta.EpisodeNumber {
+			continue
+		}
+		resolved = append(resolved, resolvedWork{work: work, episode: episode, reason: reason})
+	}
+	if len(unresolved) > 0 {
+		return nil, fmt.Errorf("work candidates remain unverified: %s", strings.Join(unresolved, "; "))
+	}
+	if len(resolved) != 1 {
+		return nil, fmt.Errorf("date and episode number resolved %d works", len(resolved))
+	}
+	match := resolved[0]
+	return &matcher.MatchResult{
+		Work:       &match.work,
+		Episode:    match.episode,
+		Confidence: matcher.AutoRenameThreshold,
+		Reasons: []string{
+			"work title, recording date, and episode number uniquely matched",
 			match.reason,
 		},
 	}, nil
