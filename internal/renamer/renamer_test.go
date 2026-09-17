@@ -62,6 +62,17 @@ func TestBuildPath(t *testing.T) {
 			wantPath: "/recordings/作品/作品 #44 「第四十四話」.mp4",
 		},
 		{
+			name:         "explicitly verified episode zero",
+			originalPath: "/recordings/作品 #01「life.00 序章」.mp4",
+			match: &matcher.MatchResult{
+				Work:                &annict.Work{ID: 1, Title: "作品"},
+				Episode:             &annict.Episode{ID: 1, Number: float64Ptr(0), NumberText: "life.0", Title: "序章"},
+				OutputEpisodeNumber: 0,
+				OutputNumberSet:     true,
+			},
+			wantPath: "/recordings/作品/作品 #0 「序章」.mp4",
+		},
+		{
 			name:         "preserve transport stream extension",
 			originalPath: "/recordings/作品 ep.7「テスト」 (20260801).ts",
 			match: &matcher.MatchResult{

@@ -543,6 +543,36 @@ func TestMatchUsesSortNumberForExactDescriptiveSpecial(t *testing.T) {
 	}
 }
 
+func TestMatchUsesExplicitLifeZeroOnlyWithExactSubtitle(t *testing.T) {
+	zero, one := 0.0, 1.0
+	episodes := map[int][]annict.Episode{1: {
+		{ID: 100, Number: &zero, NumberText: "life.0", SortNumber: 10, Title: "体育館裏のホーリー"},
+		{ID: 101, Number: &one, NumberText: "life.1", SortNumber: 20, Title: "そうさ、京都に行こう"},
+	}}
+	result := Match(
+		&parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 1, Subtitle: "life.00 体育館裏のホーリー"},
+		[]annict.Work{{ID: 1, Title: "作品"}},
+		episodes,
+		nil,
+	)
+	if result == nil || result.Episode == nil || result.Episode.ID != 100 || result.Confidence < AutoRenameThreshold {
+		t.Fatalf("Match() = %+v, want explicit life.0 episode", result)
+	}
+	if got, ok := MatchResultEpisodeNumber(result); !ok || got != 0 {
+		t.Fatalf("MatchResultEpisodeNumber() = %d, %v; want 0, true", got, ok)
+	}
+
+	wrong := Match(
+		&parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 1, Subtitle: "life.00 別の話"},
+		[]annict.Work{{ID: 1, Title: "作品"}},
+		episodes,
+		nil,
+	)
+	if wrong == nil || wrong.Episode == nil || wrong.Episode.ID == 100 || wrong.Confidence >= AutoRenameThreshold {
+		t.Fatalf("Match(wrong subtitle) = %+v, want zero episode rejected", wrong)
+	}
+}
+
 func TestEpisodeNumberUsesExplicitLabelForFractionalSpecial(t *testing.T) {
 	episode := &annict.Episode{Number: float64Ptr(10.5), NumberText: "第11話", SortNumber: 110}
 	if got, ok := EpisodeNumber(episode); !ok || got != 11 {

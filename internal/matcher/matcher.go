@@ -25,6 +25,7 @@ type MatchResult struct {
 	Reasons             []string
 	FileSubtitle        string // Subtitle parsed from filename, used when Annict has no subtitle
 	OutputEpisodeNumber int    // Explicit public label matched in the filename, when different from Annict's local Number
+	OutputNumberSet     bool   // Distinguishes an explicitly verified episode zero from no override
 }
 
 // Confidence thresholds
@@ -40,6 +41,7 @@ var episodeNumberTextPattern = regexp.MustCompile(`(?i)^(?:第\s*([0-9]+)\s*(?:�
 var kanjiEpisodeNumberTextPattern = regexp.MustCompile(`^第\s*([〇一二三四五六七八九十百千壱弐参肆伍陸漆捌玖拾]+)\s*(?:話|幕|番|怪|夜|回|局|羽|R)$`)
 var subtitleSegmentOrdinalPrefix = regexp.MustCompile(`(?i)^(?:episode[0-9]+|其の[0-9一二三四五六七八九十]+|[a-z]:)`)
 var subtitleEpisodeLabelPrefix = regexp.MustCompile(`(?i)^(?:life[.\s]*(?:[0-9]+|max(?:imum)?)(?:\s*vs\s*power[.\s]*max(?:imum)?)?|コミュ[0-9]+)`)
+var zeroEpisodeLabelPattern = regexp.MustCompile(`(?i)^life[.\s]*0+(?:\s|$)`)
 var spacedKatakanaReadingPattern = regexp.MustCompile(`([\p{L}\p{N}])[\s\x{3000}]+([（(][\p{Katakana}ー・･\s\x{3000}]{6,}[）)])`)
 var subtitleOtherSummarySuffix = regexp.MustCompile(`[\s\x{3000}]*(?:ほか|他)(?:[\s\x{3000}]*[0-9０-９〇一二三四五六七八九十]+[\s\x{3000}]*本)?[\s\x{3000}]*$`)
 var repeatedMiddleDots = regexp.MustCompile(`・{2,}`)
@@ -238,7 +240,10 @@ func match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 		episode := findMatchingEpisode(episodeNumberForMatch, meta.Subtitle, episodes)
 		if episode != nil {
 			result.Episode = episode
-			if displayed, ok := episodeLabelNumber(episode); ok && displayed == meta.EpisodeNumber {
+			if explicitZeroEpisodeMatches(episode, meta.Subtitle) {
+				result.OutputEpisodeNumber = 0
+				result.OutputNumberSet = true
+			} else if displayed, ok := episodeLabelNumber(episode); ok && displayed == meta.EpisodeNumber {
 				result.OutputEpisodeNumber = displayed
 			} else if specialSortNumberMatches(episode, meta.EpisodeNumber, meta.Subtitle) {
 				result.OutputEpisodeNumber = meta.EpisodeNumber
@@ -754,7 +759,7 @@ func MatchResultEpisodeNumber(result *MatchResult) (int, bool) {
 	if result == nil || result.Episode == nil {
 		return 0, false
 	}
-	if result.OutputEpisodeNumber > 0 {
+	if result.OutputNumberSet || result.OutputEpisodeNumber > 0 {
 		return result.OutputEpisodeNumber, true
 	}
 	return EpisodeNumber(result.Episode)
@@ -795,6 +800,8 @@ func episodeNumberMatches(e *annict.Episode, number int) bool {
 
 // findMatchingEpisode finds an episode matching the given number and subtitle.
 func findMatchingEpisode(number int, subtitle string, episodes []annict.Episode) *annict.Episode {
+	var zeroMatch *annict.Episode
+	zeroAmbiguous := false
 	var labelMatch *annict.Episode
 	var labelAndSubtitleMatch *annict.Episode
 	labelAmbiguous := false
@@ -808,6 +815,13 @@ func findMatchingEpisode(number int, subtitle string, episodes []annict.Episode)
 
 	for i := range episodes {
 		e := &episodes[i]
+		if explicitZeroEpisodeMatches(e, subtitle) {
+			if zeroMatch != nil {
+				zeroAmbiguous = true
+			} else {
+				zeroMatch = e
+			}
+		}
 
 		if labelNumber, ok := episodeLabelNumber(e); ok && labelNumber == number {
 			if labelMatch != nil {
@@ -851,6 +865,9 @@ func findMatchingEpisode(number int, subtitle string, episodes []annict.Episode)
 	}
 
 	// An explicit public label is stronger than a work-local Number.
+	if zeroMatch != nil && !zeroAmbiguous {
+		return zeroMatch
+	}
 	if labelAndSubtitleMatch != nil && !labelAndSubtitleAmbiguous {
 		return labelAndSubtitleMatch
 	}
@@ -909,6 +926,17 @@ func findMatchingEpisode(number int, subtitle string, episodes []annict.Episode)
 		return localMatch
 	}
 	return nil
+}
+
+func explicitZeroEpisodeMatches(episode *annict.Episode, subtitle string) bool {
+	if episode == nil || episode.Number == nil || *episode.Number != 0 || episode.Title == "" || subtitle == "" {
+		return false
+	}
+	if !zeroEpisodeLabelPattern.MatchString(normalize.Normalize(strings.TrimSpace(episode.NumberText))) ||
+		!zeroEpisodeLabelPattern.MatchString(normalize.Normalize(strings.TrimSpace(subtitle))) {
+		return false
+	}
+	return subtitlesEquivalent(episode.Title, subtitle)
 }
 
 func specialSortNumberMatches(episode *annict.Episode, number int, subtitle string) bool {
