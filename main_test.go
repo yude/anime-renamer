@@ -722,6 +722,78 @@ func TestProcessFileResolvesDateOnlyFromUniqueSyobocalSchedule(t *testing.T) {
 	}
 }
 
+func TestProcessFileUsesDateToSelectRelatedSeason(t *testing.T) {
+	graphqlRequests := 0
+	annictServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/graphql" {
+			http.NotFound(w, r)
+			return
+		}
+		graphqlRequests++
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[
+			{"node":{"annictId":1,"title":"作品","syobocalTid":100,"episodesCount":2,"episodes":{"edges":[
+				{"node":{"annictId":101,"number":1,"numberText":"第1話","sortNumber":100,"title":"旧作一"}},
+				{"node":{"annictId":102,"number":2,"numberText":"第2話","sortNumber":200,"title":"旧作二"}}
+			]}}},
+			{"node":{"annictId":2,"title":"作品 シーズン2","syobocalTid":200,"episodesCount":2,"episodes":{"edges":[
+				{"node":{"annictId":201,"number":13,"numberText":"第13話","sortNumber":1300,"title":"新作一"}},
+				{"node":{"annictId":202,"number":14,"numberText":"第14話","sortNumber":1400,"title":"新作二"}}
+			]}}}
+		]}}}`)
+	}))
+	defer annictServer.Close()
+
+	syobocalServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tid := r.URL.Query().Get("TID")
+		if tid == "100" {
+			fmt.Fprint(w, `<ProgLookupResponse><ProgItems></ProgItems><Result><Code>200</Code></Result></ProgLookupResponse>`)
+			return
+		}
+		if tid != "200" {
+			t.Fatalf("unexpected Syobocal TID %q", tid)
+		}
+		date := r.URL.Query().Get("Range")[:8]
+		count := 13
+		title := "新作一"
+		if date == "20220429" {
+			count = 14
+			title = "新作二"
+		}
+		formatted := date[:4] + "-" + date[4:6] + "-" + date[6:]
+		fmt.Fprintf(w, `<ProgLookupResponse><ProgItems><ProgItem><PID>%d</PID><TID>200</TID><StTime>%s 23:00:00</StTime><EdTime>%s 23:30:00</EdTime><Count>%d</Count><Deleted>0</Deleted><Warn>0</Warn><ChID>71</ChID><STSubTitle>%s</STSubTitle></ProgItem></ProgItems><Result><Code>200</Code></Result></ProgLookupResponse>`, count, formatted, formatted, count, title)
+	}))
+	defer syobocalServer.Close()
+
+	dir := t.TempDir()
+	files := []string{
+		filepath.Join(dir, "作品 (20220422).mp4"),
+		filepath.Join(dir, "作品[終] (20220429).mp4"),
+	}
+	for _, file := range files {
+		if err := os.WriteFile(file, []byte("recording"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	client := annict.NewClientWithURLs("token", annictServer.URL, annictServer.URL+"/graphql")
+	c := cache.NewDisabled(filepath.Join(dir, "cache"))
+	workCache := make(map[string][]annict.Work)
+	episodesCache := make(map[int][]annict.Episode)
+	programsCache := make(map[programsCacheKey][]annict.Program)
+	plans := make(map[string]string)
+	processing := &processingContext{syobocalClient: syobocal.NewClientWithBaseURL(syobocalServer.URL)}
+	for i, file := range files {
+		result := processFile(file, client, c, workCache, episodesCache, programsCache, plans, true, false, matcher.AutoRenameThreshold, "", processing)
+		wantEpisode := 13 + i
+		if result.Error != nil || result.SkipReason != "" || !result.Previewed || result.WorkTitle != "作品 シーズン2" || result.EpisodeNum != wantEpisode {
+			t.Fatalf("processFile(%q) = %+v, want related season episode %d", file, result, wantEpisode)
+		}
+	}
+	if graphqlRequests != 2 {
+		t.Errorf("GraphQL requests = %d, want initial and related searches", graphqlRequests)
+	}
+}
+
 func TestProcessFileResolvesCompositeSubtitlePartFromUniqueDate(t *testing.T) {
 	annictServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/graphql" {

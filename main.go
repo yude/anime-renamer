@@ -362,11 +362,51 @@ func processFile(
 			batchSchedule = runtime.batchSchedule
 		}
 		result, err = matchDateOnly(meta, works, episodesCache, c, scheduleClient, batchSchedule)
+		if err != nil && len(works) == 1 {
+			relatedWorks, relatedErr := searchRelatedWorks(client, c, meta.WorkTitle, workCache, episodesCache)
+			if relatedErr == nil && len(relatedWorks) > len(works) {
+				if relatedResult, relatedDateErr := matchDateOnlyAcrossWorks(meta, relatedWorks, episodesCache, c, scheduleClient, batchSchedule); relatedDateErr == nil {
+					result = relatedResult
+					err = nil
+					fmt.Fprintf(os.Stderr, "  Fallback:  date uniquely identified an explicitly named related work\n")
+				} else {
+					err = fmt.Errorf("%v; related works: %w", err, relatedDateErr)
+				}
+			} else if relatedErr != nil {
+				err = fmt.Errorf("%v; search related works: %w", err, relatedErr)
+			}
+		}
 		if err != nil {
 			return &renamer.RenameResult{
 				OriginalPath: file,
 				SkipReason:   fmt.Sprintf("date-only episode could not be verified: %v", err),
 			}
+		}
+	} else if meta.FinalEpisode && meta.EpisodeNumber == 0 && meta.Subtitle == "" && !meta.RecordedDate.IsZero() && len(works) == 1 {
+		var scheduleClient syobocalProgramClient
+		var batchSchedule *batchScheduleContext
+		if runtime != nil {
+			scheduleClient = runtime.syobocalClient
+			batchSchedule = runtime.batchSchedule
+		}
+		relatedWorks, relatedErr := searchRelatedWorks(client, c, meta.WorkTitle, workCache, episodesCache)
+		if relatedErr != nil {
+			return &renamer.RenameResult{
+				OriginalPath: file,
+				SkipReason:   fmt.Sprintf("dated final episode could not search related works: %v", relatedErr),
+			}
+		}
+		if len(relatedWorks) > len(works) {
+			result, err = matchDateOnlyAcrossWorks(meta, relatedWorks, episodesCache, c, scheduleClient, batchSchedule)
+			if err != nil {
+				return &renamer.RenameResult{
+					OriginalPath: file,
+					SkipReason:   fmt.Sprintf("dated final episode could not be verified across related works: %v", err),
+				}
+			}
+			fmt.Fprintf(os.Stderr, "  Fallback:  date selected the final episode of an explicitly named related work\n")
+		} else {
+			result = matcher.Match(meta, works, episodesCache, nil)
 		}
 	} else {
 		result = matcher.Match(meta, works, episodesCache, nil)
@@ -669,6 +709,72 @@ func matchDateOnly(meta *parser.RecordingMetadata, works []annict.Work, episodes
 		Reasons: []string{
 			"work title uniquely matched Annict",
 			reason,
+		},
+	}, nil
+}
+
+func matchDateOnlyAcrossWorks(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork map[int][]annict.Episode, c *cache.Cache, client syobocalProgramClient, batch *batchScheduleContext) (*matcher.MatchResult, error) {
+	if len(works) == 0 {
+		return nil, errors.New("no related Annict works")
+	}
+	if len(works) == 1 {
+		return matchDateOnly(meta, works, episodesByWork, c, client, batch)
+	}
+	if client == nil {
+		return nil, errors.New("syobocal client is unavailable")
+	}
+
+	type resolvedWork struct {
+		work    annict.Work
+		episode *annict.Episode
+		reason  string
+	}
+	resolved := make([]resolvedWork, 0, 1)
+	var unresolved []string
+	for _, work := range works {
+		tid, err := strconv.Atoi(work.SyobocalTID)
+		if err != nil || tid <= 0 {
+			unresolved = append(unresolved, fmt.Sprintf("%q has no valid Syobocal TID", work.Title))
+			continue
+		}
+		programs, err := getSyobocalPrograms(c, client, tid, meta.RecordedDate)
+		if err != nil {
+			unresolved = append(unresolved, fmt.Sprintf("%q schedule lookup failed: %v", work.Title, err))
+			continue
+		}
+		episode, reason := dateinfer.ResolveUniqueWithSubtitle(meta.RecordedDate, episodesByWork[work.ID], programs, meta.Subtitle)
+		if episode == nil {
+			if channelID, anchors, ok := batch.trustedChannel(work.ID); ok {
+				if channelEpisode, channelReason := dateinfer.ResolveForChannelWithSubtitle(meta.RecordedDate, episodesByWork[work.ID], programs, channelID, meta.Subtitle); channelEpisode != nil {
+					episode = channelEpisode
+					reason = fmt.Sprintf("%s using %d consistent batch anchors", channelReason, anchors)
+				} else {
+					reason = fmt.Sprintf("%s; trusted channel also failed: %s", reason, channelReason)
+				}
+			}
+		}
+		if episode == nil {
+			if dateinfer.HasUsableSchedule(meta.RecordedDate, programs) {
+				unresolved = append(unresolved, fmt.Sprintf("%q: %s", work.Title, reason))
+			}
+			continue
+		}
+		resolved = append(resolved, resolvedWork{work: work, episode: episode, reason: reason})
+	}
+	if len(unresolved) > 0 {
+		return nil, fmt.Errorf("related work candidates remain unverified: %s", strings.Join(unresolved, "; "))
+	}
+	if len(resolved) != 1 {
+		return nil, fmt.Errorf("date resolved %d related works", len(resolved))
+	}
+	match := resolved[0]
+	return &matcher.MatchResult{
+		Work:       &match.work,
+		Episode:    match.episode,
+		Confidence: matcher.AutoRenameThreshold,
+		Reasons: []string{
+			"related work title and date uniquely matched",
+			match.reason,
 		},
 	}, nil
 }
