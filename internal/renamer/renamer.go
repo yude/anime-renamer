@@ -113,9 +113,10 @@ func BuildPath(originalPath string, result *matcher.MatchResult) (string, error)
 		workDir = dir
 	}
 
-	// Use file subtitle when Annict episode has no title
+	// Use the file subtitle when the matcher established that Annict has no
+	// usable title (including a known API placeholder).
 	subtitle := result.Episode.Title
-	if subtitle == "" {
+	if result.FileSubtitle != "" {
 		subtitle = result.FileSubtitle
 	}
 	subtitle = sanitizePathComponent(subtitle)
@@ -229,7 +230,7 @@ func Rename(originalPath string, result *matcher.MatchResult, dryRun bool, outpu
 	r.WorkTitle = result.Work.Title
 	r.EpisodeNum, _ = matcher.MatchResultEpisodeNumber(result)
 	r.Subtitle = result.Episode.Title
-	if r.Subtitle == "" {
+	if result.FileSubtitle != "" {
 		r.Subtitle = result.FileSubtitle
 	}
 

@@ -737,6 +737,62 @@ func TestSubtitlesEquivalentForScoringToleratesOnlyOneLongSubtitleInsertion(t *t
 	}
 }
 
+func TestMatchUsesFileSubtitleForKnownAnnictPlaceholder(t *testing.T) {
+	result := Match(
+		&parser.RecordingMetadata{WorkTitle: "義妹生活", EpisodeNumber: 12, Subtitle: "tomorrow and tomorrow"},
+		[]annict.Work{{ID: 1, Title: "義妹生活"}},
+		map[int][]annict.Episode{1: {{ID: 161796, Number: float64Ptr(12), Title: "　　と　　"}}},
+		nil,
+	)
+	if result == nil || result.Confidence < AutoRenameThreshold {
+		t.Fatalf("Match() = %+v, want confidence >= %d", result, AutoRenameThreshold)
+	}
+	if result.FileSubtitle != "tomorrow and tomorrow" {
+		t.Fatalf("FileSubtitle = %q, want source subtitle", result.FileSubtitle)
+	}
+	if episodeTitleUnavailable("と") {
+		t.Fatal("a literal title と without placeholder whitespace must remain meaningful")
+	}
+}
+
+func TestSubtitleScoringAllowsVerifiedRanmaTypoOnly(t *testing.T) {
+	if !subtitlesEquivalentForScoring("かんばれムース", "がんばれムース") {
+		t.Fatal("verified Annict/EPG variant should match after episode selection")
+	}
+	if subtitlesEquivalent("かんばれムース", "がんばれムース") {
+		t.Fatal("verified scoring variant must not disambiguate candidate episodes")
+	}
+	if subtitlesEquivalentForScoring("かんばれムース", "がんばれシャンプー") {
+		t.Fatal("unlisted subtitle difference must remain a mismatch")
+	}
+}
+
+func TestMatchRelatedUsesParentheticalWorkYearWithoutRecordingDate(t *testing.T) {
+	works := []annict.Work{
+		{ID: 1, Title: "らんま1/2", SeasonName: "1989-spring"},
+		{ID: 2, Title: "らんま1/2(2024)", SeasonName: "2024-autumn"},
+		{ID: 3, Title: "らんま1/2 第2期", SeasonName: "2025-autumn"},
+	}
+	episodesByWork := map[int][]annict.Episode{
+		1: {{ID: 101, Number: float64Ptr(24), Title: "旧作の第二十四話"}},
+		2: {{ID: 201, Number: float64Ptr(12), Title: "第1期最終話"}},
+		3: {{ID: 301, Number: float64Ptr(24), Title: "かんばれムース"}},
+	}
+	meta := &parser.RecordingMetadata{
+		WorkTitle:     "らんま1／2(2025)",
+		EpisodeNumber: 24,
+		Subtitle:      "がんばれムース",
+	}
+
+	result := MatchRelated(meta, works, episodesByWork, nil)
+	if result == nil || result.Work == nil || result.Work.ID != 3 {
+		t.Fatalf("MatchRelated() = %+v, want the unique 2025 work", result)
+	}
+	if result.Confidence < AutoRenameThreshold {
+		t.Fatalf("Confidence = %d, want >= %d (reasons: %v)", result.Confidence, AutoRenameThreshold, result.Reasons)
+	}
+}
+
 func TestSubtitlesEquivalentStripsKomiSegmentNumber(t *testing.T) {
 	if !subtitlesEquivalent("メリークリスマス…です。", "コミュ５６ メリークリスマス…です。") {
 		t.Fatal("Komi EPG segment number should not hide an otherwise exact subtitle")

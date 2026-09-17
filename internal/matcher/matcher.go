@@ -33,6 +33,7 @@ const (
 )
 
 var seriesContinuationPattern = regexp.MustCompile(`^(?:第?[0-9]+(?:期|クール(?:目)?)|season[0-9]+|[0-9]+(?:st|nd|rd|th)(?:season|シーズン)|シーズン[0-9]+|part[0-9]+|netflixオリジナル|tv放送)`)
+var parentheticalWorkYearPattern = regexp.MustCompile(`[（(]([0-9]{4})(?:年版)?[）)]`)
 
 var episodeNumberTextPattern = regexp.MustCompile(`(?i)^(?:第\s*([0-9]+)\s*(?:話|幕|番|怪|夜|回|局|羽|R)|#\s*([0-9]+)|episode[.\s]*([0-9]+)|sailing\s*([0-9]+)|ride[.\s]*([0-9]+)|([0-9]+))$`)
 var kanjiEpisodeNumberTextPattern = regexp.MustCompile(`^第\s*([〇一二三四五六七八九十百千壱弐参肆伍陸漆捌玖拾]+)\s*(?:話|幕|番|怪|夜|回|局|羽|R)$`)
@@ -126,6 +127,13 @@ func match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 	}
 	if len(candidateWorks) == 0 {
 		return nil
+	}
+	if meta.RecordedDate.IsZero() {
+		if year, ok := workYearFromTitle(meta.WorkTitle); ok {
+			if narrowed := narrowByWorkYear(candidateWorks, year); len(narrowed) > 0 {
+				candidateWorks = narrowed
+			}
+		}
 	}
 
 	// If multiple candidates, try to narrow down by season
@@ -248,10 +256,10 @@ func match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 			if meta.Subtitle == "" {
 				result.Confidence += 20
 				result.Reasons = append(result.Reasons, "no subtitle in file, episode matched")
-			} else if episode.Title == "" {
+			} else if episodeTitleUnavailable(episode.Title) {
 				result.Confidence += 20
 				result.FileSubtitle = meta.Subtitle
-				result.Reasons = append(result.Reasons, "subtitle in file but not in annict")
+				result.Reasons = append(result.Reasons, "subtitle in file but unavailable in annict")
 			} else if normalize.Compare(episode.Title, meta.Subtitle) {
 				result.Confidence += 20
 				result.Reasons = append(result.Reasons, "subtitle exact match")
@@ -521,6 +529,26 @@ func narrowBySeason(works []annict.Work, seasonYear int, seasonName string) []an
 	for _, w := range works {
 		if strings.HasPrefix(w.SeasonName, seasonPrefix) {
 			result = append(result, w)
+		}
+	}
+	return result
+}
+
+func workYearFromTitle(title string) (int, bool) {
+	matches := parentheticalWorkYearPattern.FindStringSubmatch(normalize.Normalize(title))
+	if len(matches) != 2 {
+		return 0, false
+	}
+	year, err := strconv.Atoi(matches[1])
+	return year, err == nil && year > 0
+}
+
+func narrowByWorkYear(works []annict.Work, year int) []annict.Work {
+	seasonPrefix := strconv.Itoa(year) + "-"
+	result := make([]annict.Work, 0, 1)
+	for _, work := range works {
+		if strings.HasPrefix(strings.ToLower(work.SeasonName), seasonPrefix) {
+			result = append(result, work)
 		}
 	}
 	return result
@@ -972,13 +1000,30 @@ func subtitleIdentityKey(s string) string {
 	return strings.TrimRight(key, "!?！？")
 }
 
+func episodeTitleUnavailable(title string) bool {
+	trimmed := strings.TrimSpace(title)
+	if trimmed == "" {
+		return true
+	}
+	// Annict episode 161796 currently exposes a whitespace-padded conjunction
+	// placeholder instead of its subtitle. Keep this deliberately narrower
+	// than treating every short title as absent: a literal title "と" remains
+	// meaningful unless the surrounding whitespace marks the known placeholder.
+	return trimmed == "と" && title != trimmed
+}
+
 // subtitlesEquivalentForScoring permits a minor EPG omission only after the
 // work and integer episode number have already selected one Annict episode.
 // Candidate selection deliberately continues to use subtitlesEquivalent.
 func subtitlesEquivalentForScoring(a, b string) bool {
 	na := subtitleScoringKey(a)
 	nb := subtitleScoringKey(b)
-	return na != "" && nb != "" && (na == nb || subtitleStructuredPartMatch(a, b) || subtitleTrailingLabelMatch(a, b) || subtitleTrailingLabelMatch(b, a) || oneRuneInsertionApart([]rune(na), []rune(nb)))
+	return na != "" && nb != "" && (na == nb || knownSubtitleVariant(na, nb) || subtitleStructuredPartMatch(a, b) || subtitleTrailingLabelMatch(a, b) || subtitleTrailingLabelMatch(b, a) || oneRuneInsertionApart([]rune(na), []rune(nb)))
+}
+
+func knownSubtitleVariant(a, b string) bool {
+	return (a == "かんばれムース" && b == "がんばれムース") ||
+		(a == "がんばれムース" && b == "かんばれムース")
 }
 
 func subtitleTrailingLabelMatch(container, whole string) bool {

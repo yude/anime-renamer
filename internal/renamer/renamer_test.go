@@ -98,6 +98,16 @@ func TestBuildPath(t *testing.T) {
 			wantPath: "/recordings/作品/作品 #1.mp4",
 		},
 		{
+			name:         "matched file subtitle replaces API placeholder",
+			originalPath: "/recordings/義妹生活 #12 「tomorrow and tomorrow」.mp4",
+			match: &matcher.MatchResult{
+				Work:         &annict.Work{ID: 1, Title: "義妹生活"},
+				Episode:      &annict.Episode{ID: 161796, Number: float64Ptr(12), Title: "　　と　　"},
+				FileSubtitle: "tomorrow and tomorrow",
+			},
+			wantPath: "/recordings/義妹生活/義妹生活 #12 「tomorrow and tomorrow」.mp4",
+		},
+		{
 			name:         "nil match",
 			originalPath: "/recordings/test.mp4",
 			match:        nil,
