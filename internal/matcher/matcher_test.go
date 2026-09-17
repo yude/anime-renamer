@@ -332,6 +332,30 @@ func TestMatchSameSeasonSameTitleStillAmbiguous(t *testing.T) {
 	}
 }
 
+func TestMatchDoesNotUseScoringOnlyOrthographyToChooseAWork(t *testing.T) {
+	works := []annict.Work{
+		{ID: 1, Title: "作品"},
+		{ID: 2, Title: "作品"},
+	}
+	meta := &parser.RecordingMetadata{
+		WorkTitle:     "作品",
+		EpisodeNumber: 5,
+		Subtitle:      "天才と凡才",
+	}
+	episodesByWork := map[int][]annict.Episode{
+		1: {{ID: 101, Number: float64Ptr(5), Title: "天才と凡人"}},
+		2: {{ID: 201, Number: float64Ptr(5), Title: "別タイトル"}},
+	}
+
+	result := Match(meta, works, episodesByWork, nil)
+	if result == nil {
+		t.Fatal("Match returned nil")
+	}
+	if result.Confidence != 0 {
+		t.Errorf("Confidence = %d, want 0 because scoring-only subtitle variants must not disambiguate works (reasons: %v)", result.Confidence, result.Reasons)
+	}
+}
+
 func TestNarrowByEpisodeNumberFallsBackToSortNumber(t *testing.T) {
 	// Regression test: episodes without a Number (only SortNumber set, as
 	// Annict sometimes returns for specials) must still be usable to
@@ -726,6 +750,27 @@ func TestMatchSubtitlePresentationVariantsReachThreshold(t *testing.T) {
 		{annict: "ビーナスライン・シェルター", file: "ビーナスライン／シェルター"},
 		{annict: "呪館 JUKAN", file: "呪館"},
 		{annict: "戦場の少年たち -The Children's Echelon-", file: "戦場の少年たち―The Chiidren's Echelon―"},
+		{annict: "生の代償、死の償い", file: "生の代償、死の贖い"},
+		{annict: "無限の残骸 アンリミテッド／レイズ・デッド", file: "無限の——— —アンリミテッド／レイズ・デッド—"},
+		{annict: "プリステラ攻略戦リザルト", file: "プリステラ攻防戦リザルト"},
+		{annict: "思い出した記憶って、なに？", file: "思い残した記憶って、なに？"},
+		{annict: "魔王と勇者、勤めに従い遊園地に行く", file: "魔王と勇者、勧めに従い遊園地に行く"},
+		{annict: "ご先祖は進化する!! メガネが映す暗黒部屋", file: "ご先祖は進化する!!メガネが映す暗黒部室"},
+		{annict: "脳汁プシャー", file: "脳汁ブシャー"},
+		{annict: "デスゲーム挑まれたけど・・・／LONG LONG A GO GO", file: "デスゲーム挑まれたけどクソゲーだった／LONG LONG A GO GO"},
+		{annict: "オプション開放おめでとうございます", file: "オプション解放おめでとうございます"},
+		{annict: "天才と凡人", file: "天才と凡才"},
+		{annict: "BUMP-BOO-CRUSADERS", file: "バン・ブ・クルセイダーズ"},
+		{annict: "飯田橋の昇竜 ～復讐のピピ～", file: "飯田橋の登竜 復讐のピピ"},
+		{annict: "青天の霹靂／瀕死の狩人", file: "晴天の霹靂／瀕死の狩人"},
+		{annict: "スパイ昇級試験", file: "スパイ昇格試験"},
+		{annict: "個人的にはラブコメ展開希望", file: "個人的にはラブコメ希望"},
+		{annict: "キスしてもまたキスしても余韻に浸っても体育祭実行委員でもラブコメにならない", file: "キスしてもまたキスしても余韻に浸っても体育会実行委員でもラブコメにならない"},
+		{annict: "雪待と昴", file: "雪侍と昴"},
+		{annict: "坊ちゃんとアリスの二人だけの歌", file: "坊ちゃんとアリスと二人だけの歌"},
+		{annict: "俺はひょっとして、最終話でヒロインの横にいるポッと出のモブキャラなのだろうか", file: "俺はひょっとして、最終話で負けヒロインの横にいるポッと出のモブキャラなのだろうか"},
+		{annict: "集う者達", file: "集う物達"},
+		{annict: "水着の一日", file: "水着で１日"},
 	} {
 		episodes := map[int][]annict.Episode{1: {{ID: 100 + i, Number: float64Ptr(1), Title: tt.annict}}}
 		meta := &parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 1, Subtitle: tt.file}
