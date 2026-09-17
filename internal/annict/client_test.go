@@ -68,6 +68,10 @@ func TestSearchTitleVariants(t *testing.T) {
 		{input: "チ。 —地球の運動について—", want: "チ。 ―地球の運動について―"},
 		{input: "ラブライブ！スーパースター！！ ２期", want: "ラブライブ！スーパースター!! 2期"},
 		{input: "ツルネ―風舞高校弓道部―アンコール", want: "ツルネ ―風舞高校弓道部―"},
+		{input: "魔法の天使クリィミーマミ", want: "魔法の天使 クリィミーマミ"},
+		{input: "バンドリ！ ガールズバンドパーティ！ 5th Anniversary Animation", want: "CiRCLE THANKS PARTY"},
+		{input: "バンドリ！ ガールズバンドパーティ！5周年記念アニメ", want: "CiRCLE THANKS PARTY"},
+		{input: "終末のワルキューレII", want: "終末のワルキューレⅡ 前編"},
 	} {
 		if got := searchTitleVariants(tt.input); !slices.Contains(got, tt.want) {
 			t.Errorf("searchTitleVariants(%q) = %q, want variant %q", tt.input, got, tt.want)

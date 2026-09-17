@@ -388,6 +388,18 @@ func TestNarrowByEpisodeNumberUsesUniqueSubtitleAcrossWorks(t *testing.T) {
 	}
 }
 
+func TestNarrowByEpisodeNumberIgnoresTrailingBroadcastPunctuation(t *testing.T) {
+	works := []annict.Work{{ID: 1, Title: "作品 前編"}, {ID: 2, Title: "作品 続編"}}
+	episodesByWork := map[int][]annict.Episode{
+		1: {{ID: 101, Number: float64Ptr(1), Title: "正義VS悪"}},
+		2: {{ID: 201, Number: float64Ptr(1), Title: "別の始まり"}},
+	}
+	got := narrowByEpisodeNumber(works, 1, "正義VS悪！", episodesByWork)
+	if got == nil || got.Work.ID != 1 || got.EpisodeNumber != 1 {
+		t.Errorf("narrowByEpisodeNumber() = %+v, want work 1 after ignoring only terminal punctuation", got)
+	}
+}
+
 func TestNarrowByEpisodeNumberMapsContinuousNumberByUniqueSubtitle(t *testing.T) {
 	works := []annict.Work{{ID: 1, Title: "作品 前半"}, {ID: 2, Title: "作品 後半"}}
 	episodesByWork := map[int][]annict.Episode{
@@ -1068,6 +1080,17 @@ func TestMatchingWorksIgnoresTitlePresentationPunctuation(t *testing.T) {
 	got := MatchingWorks("16bitセンセーション -ANOTHER LAYER-", works)
 	if len(got) != 1 || got[0].ID != 1 {
 		t.Errorf("MatchingWorks() = %+v, want only the punctuation-equivalent main work", got)
+	}
+}
+
+func TestMatchingWorksPrefersExactPresentationBeforeNormalization(t *testing.T) {
+	works := []annict.Work{
+		{ID: 1, Title: "邪神ちゃんドロップキック"},
+		{ID: 2, Title: "邪神ちゃんドロップキック'"},
+	}
+	got := MatchingWorks("邪神ちゃんドロップキック", works)
+	if len(got) != 1 || got[0].ID != 1 {
+		t.Errorf("MatchingWorks() = %+v, want only the exact base work", got)
 	}
 }
 

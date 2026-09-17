@@ -451,6 +451,21 @@ func findFinalEpisode(work annict.Work, episodes []annict.Episode) *annict.Episo
 // Match would reject do not trigger unnecessary follow-up requests.
 func MatchingWorks(title string, works []annict.Work) []annict.Work {
 	var matches []annict.Work
+	trimmed := strings.TrimSpace(title)
+
+	// Prefer an exact presentation match before punctuation-insensitive
+	// normalization. Some sequel markers consist only of punctuation (for
+	// example a trailing apostrophe), so normalizing first can collapse a base
+	// series and its sequel into an avoidably ambiguous candidate set.
+	for _, w := range works {
+		if strings.TrimSpace(w.Title) == trimmed {
+			matches = append(matches, w)
+		}
+	}
+	if len(matches) > 0 {
+		return matches
+	}
+
 	normalized := normalize.NormalizeTitleForMatch(title)
 
 	for _, w := range works {
@@ -950,7 +965,11 @@ func slashSubtitleParts(s string) []string {
 
 func subtitleIdentityKey(s string) string {
 	key := normalize.NormalizeSubtitleForMatch(s)
-	return subtitleEpisodeLabelPrefix.ReplaceAllString(key, "")
+	key = subtitleEpisodeLabelPrefix.ReplaceAllString(key, "")
+	// Terminal question/exclamation marks are frequently added by the EPG but
+	// omitted from Annict (or vice versa). Ignore only a trailing run so the
+	// semantic punctuation inside a subtitle remains part of its identity.
+	return strings.TrimRight(key, "!?！？")
 }
 
 // subtitlesEquivalentForScoring permits a minor EPG omission only after the

@@ -136,6 +136,9 @@ func NormalizeTitleForMatch(s string) string {
 	if key == "ツルネ風舞高校弓道部アンコール" {
 		return NormalizeTitleForMatch("ツルネ ―風舞高校弓道部―")
 	}
+	if key == "バンドリ!ガールズバンドパーテイ!5thanniversaryanimation" || key == "バンドリ!ガールズバンドパーテイ!5周年記念アニメ" {
+		return NormalizeTitleForMatch("BanG Dream! ガールズバンドパーティ！5th Anniversary Animation -CiRCLE THANKS PARTY!-")
+	}
 	return key
 }
 
