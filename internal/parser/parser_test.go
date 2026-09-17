@@ -904,6 +904,17 @@ func TestParseFilename(t *testing.T) {
 			wantTitle: "作品 HOME 2",
 			wantSub:   "タイトル",
 		},
+		{
+			name:      "episode at end of quoted program label",
+			input:     "上伊那ぼたん、酔へる姿は百合の花 # 「上伊那ぼたん、酒の肴になる話 おかわり」#10」.mp4",
+			wantTitle: "上伊那ぼたん、酔へる姿は百合の花",
+			wantEp:    10,
+		},
+		{
+			name:      "empty hash and ordinary quote have no episode",
+			input:     "作品 #「番組内コーナー」.mp4",
+			wantTitle: "作品 #「番組内コーナー」",
+		},
 
 		// === Error cases ===
 		{

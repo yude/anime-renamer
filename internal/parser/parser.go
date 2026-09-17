@@ -85,6 +85,11 @@ var (
 	reportEpisodePattern        = regexp.MustCompile(`(?:れぽーと|レポート)[.．\s\x{3000}]*([0-9０-９]+)`)
 	bunchEpisodePattern         = regexp.MustCompile(`([0-9０-９]+)[\s\x{3000}]*ふさ目`)
 	homeEpisodePattern          = regexp.MustCompile(`(?i)[hｈ][oｏ][mｍ][eｅ][.．][\s\x{3000}]*([0-9０-９]+)`)
+	// Some recorder names wrap a web-program label after an empty hash and
+	// place the actual episode number at the end of that quote:
+	//   作品 #「番組内コーナー #10」
+	// The empty leading hash is the work/title boundary, not an episode.
+	quotedProgramEpisodePattern = regexp.MustCompile(`[#＃♯][\s\x{3000}]*[「『][^#＃♯]*[」』][\s\x{3000}]*[#＃♯][\s\x{3000}]*([0-9０-９]+)[」』]`)
 
 	leadingBracketTagPattern       = regexp.MustCompile(`^[\s]*【[^】]*】`)
 	leadingAngleTagPattern         = regexp.MustCompile(`^[\s]*＜[^＞]*＞`)
@@ -374,6 +379,7 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 		reportEpisodePattern,
 		bunchEpisodePattern,
 		homeEpisodePattern,
+		quotedProgramEpisodePattern,
 	}
 	if m := earliestEpisodeMatch(name, decimalPatterns...); m != nil {
 		parsedNumber, err := decimalEpisodeNumber(name[m[2]:m[3]])
