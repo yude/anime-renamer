@@ -83,6 +83,8 @@ var (
 	rollEpisodePattern          = regexp.MustCompile(`ろ[~〜～ー]る[\s\x{3000}]*([0-9０-９]+)`)
 	stageEpisodePattern         = regexp.MustCompile(`[sSｓＳ][tTｔＴ][aAａＡ][gGｇＧ][eEｅＥ][.．\s\x{3000}]*([0-9０-９]+)`)
 	reportEpisodePattern        = regexp.MustCompile(`(?:れぽーと|レポート)[.．\s\x{3000}]*([0-9０-９]+)`)
+	bunchEpisodePattern         = regexp.MustCompile(`([0-9０-９]+)[\s\x{3000}]*ふさ目`)
+	homeEpisodePattern          = regexp.MustCompile(`(?i)[hｈ][oｏ][mｍ][eｅ][.．][\s\x{3000}]*([0-9０-９]+)`)
 
 	leadingBracketTagPattern       = regexp.MustCompile(`^[\s]*【[^】]*】`)
 	leadingAngleTagPattern         = regexp.MustCompile(`^[\s]*＜[^＞]*＞`)
@@ -253,6 +255,18 @@ func ambiguousEpisodeNotation(name string) string {
 			return match
 		}
 	}
+	customMatches := 0
+	firstCustomMatch := ""
+	for _, pattern := range []*regexp.Regexp{bunchEpisodePattern, homeEpisodePattern} {
+		matches := pattern.FindAllString(name, -1)
+		customMatches += len(matches)
+		if firstCustomMatch == "" && len(matches) > 0 {
+			firstCustomMatch = matches[0]
+		}
+	}
+	if customMatches > 1 {
+		return firstCustomMatch
+	}
 	return ""
 }
 
@@ -358,6 +372,8 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 		rollEpisodePattern,
 		stageEpisodePattern,
 		reportEpisodePattern,
+		bunchEpisodePattern,
+		homeEpisodePattern,
 	}
 	if m := earliestEpisodeMatch(name, decimalPatterns...); m != nil {
 		parsedNumber, err := decimalEpisodeNumber(name[m[2]:m[3]])

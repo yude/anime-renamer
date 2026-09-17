@@ -882,6 +882,28 @@ func TestParseFilename(t *testing.T) {
 			wantEp:    5,
 			wantSub:   "潮干狩りと顧問",
 		},
+		{
+			name:      "bunch episode label",
+			input:     "アホガール １ふさ目「来たぞ！アホガール」 (2022_10_13).mp4",
+			wantTitle: "アホガール",
+			wantEp:    1,
+			wantSub:   "来たぞ！アホガール",
+			wantDate:  time.Date(2022, 10, 13, 0, 0, 0, 0, jst),
+		},
+		{
+			name:      "home episode label",
+			input:     "帝乃三姉妹は案外、チョロい。 home．02「彼女の、秘密。」 (20250717).mp4",
+			wantTitle: "帝乃三姉妹は案外、チョロい。",
+			wantEp:    2,
+			wantSub:   "彼女の、秘密。",
+			wantDate:  time.Date(2025, 7, 17, 0, 0, 0, 0, jst),
+		},
+		{
+			name:      "home requires dot separator",
+			input:     "作品 HOME 2「タイトル」.mp4",
+			wantTitle: "作品 HOME 2",
+			wantSub:   "タイトル",
+		},
 
 		// === Error cases ===
 		{
@@ -952,6 +974,16 @@ func TestParseFilename(t *testing.T) {
 		{
 			name:    "episode range with one trailing suffix is rejected",
 			input:   "TVアニメ『はたらく細胞』1～4話.mp4",
+			wantErr: true,
+		},
+		{
+			name:    "multiple bunch episode labels are rejected",
+			input:   "作品 1ふさ目／2ふさ目.mp4",
+			wantErr: true,
+		},
+		{
+			name:    "mixed custom episode labels are rejected",
+			input:   "作品 home.01／2ふさ目.mp4",
 			wantErr: true,
 		},
 		{
