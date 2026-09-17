@@ -483,6 +483,19 @@ func processFile(
 			fmt.Fprintf(os.Stderr, "  Fallback:  found a stronger match in an explicitly named related work\n")
 		}
 	}
+	if meta.Subtitle != "" && (result.Episode == nil || result.Confidence < matcher.AutoRenameThreshold) {
+		specialWorks, specialErr := searchSpecialWorks(client, c, meta.WorkTitle, workCache, episodesCache)
+		if specialErr != nil {
+			if verbose {
+				fmt.Fprintf(os.Stderr, "  Warning: could not search explicit special works: %v\n", specialErr)
+			}
+		} else if specialResult := matcher.Match(meta, specialWorks, episodesCache, nil); specialResult != nil && specialResult.Episode != nil && specialResult.Confidence > result.Confidence {
+			works = specialWorks
+			result = specialResult
+			usedRelatedWorks = false
+			fmt.Fprintf(os.Stderr, "  Fallback:  exact subtitle matched an explicitly labelled special work\n")
+		}
+	}
 
 	// Step 5: Fetch programs only when date verification can change the
 	// threshold decision, or when verbose output explicitly requests program
@@ -1003,6 +1016,7 @@ func searchWork(client *annict.Client, c *cache.Cache, title string, wc map[stri
 }
 
 const relatedWorkCachePrefix = "\x00related:"
+const specialWorkCachePrefix = "\x00special:"
 
 func searchRelatedWorks(client *annict.Client, c *cache.Cache, title string, wc map[string][]annict.Work, ec map[int][]annict.Episode) ([]annict.Work, error) {
 	cacheKey := relatedWorkCachePrefix + title
@@ -1031,6 +1045,38 @@ func searchRelatedWorks(client *annict.Client, c *cache.Cache, title string, wc 
 		}
 		if _, err := getEpisodes(client, c, work.ID, ec); err != nil {
 			return nil, fmt.Errorf("get episodes for related work %q: %w", work.Title, err)
+		}
+	}
+	return works, nil
+}
+
+func searchSpecialWorks(client *annict.Client, c *cache.Cache, title string, wc map[string][]annict.Work, ec map[int][]annict.Episode) ([]annict.Work, error) {
+	cacheKey := specialWorkCachePrefix + title
+	if works, ok := wc[cacheKey]; ok {
+		return works, nil
+	}
+
+	works, episodesByWork, err := client.SearchWorks(title)
+	if err != nil {
+		return nil, err
+	}
+	works = matcher.MatchingSpecialWorks(title, works)
+	wc[cacheKey] = works
+
+	for _, work := range works {
+		if episodes, ok := episodesByWork[work.ID]; ok && episodesComplete(work, episodes) {
+			if _, cached := ec[work.ID]; !cached {
+				ec[work.ID] = episodes
+				_ = c.SetEpisodes(work.ID, episodes)
+			}
+		}
+	}
+	for _, work := range works {
+		if _, ok := ec[work.ID]; ok {
+			continue
+		}
+		if _, err := getEpisodes(client, c, work.ID, ec); err != nil {
+			return nil, fmt.Errorf("get episodes for special work %q: %w", work.Title, err)
 		}
 	}
 	return works, nil

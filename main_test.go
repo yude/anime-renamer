@@ -848,6 +848,52 @@ func TestProcessFileUsesDateAndNumberToSelectAmbiguousRemake(t *testing.T) {
 	}
 }
 
+func TestProcessFileUsesExactSubtitleForExplicitOVA(t *testing.T) {
+	graphqlRequests := 0
+	annictServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/graphql" {
+			http.NotFound(w, r)
+			return
+		}
+		graphqlRequests++
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[
+			{"node":{"annictId":1,"title":"作品2","episodesCount":1,"episodes":{"edges":[
+				{"node":{"annictId":101,"number":10,"numberText":"第10話","sortNumber":1000,"title":"TV最終話"}}
+			]}}},
+			{"node":{"annictId":2,"title":"作品2 OVA","episodesCount":1,"episodes":{"edges":[
+				{"node":{"annictId":201,"number":1,"numberText":"OVA","sortNumber":100,"title":"この素晴らしい芸術に祝福を！"}}
+			]}}}
+		]}}}`)
+	}))
+	defer annictServer.Close()
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "作品2[終]第11話「この素晴らしい芸術に祝福を!」.mp4")
+	if err := os.WriteFile(file, []byte("recording"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result := processFile(
+		file,
+		annict.NewClientWithURLs("token", annictServer.URL, annictServer.URL+"/graphql"),
+		cache.NewDisabled(filepath.Join(dir, "cache")),
+		make(map[string][]annict.Work),
+		make(map[int][]annict.Episode),
+		make(map[programsCacheKey][]annict.Program),
+		make(map[string]string),
+		true,
+		false,
+		matcher.AutoRenameThreshold,
+		"",
+	)
+	if result.Error != nil || result.SkipReason != "" || !result.Previewed || result.WorkTitle != "作品2 OVA" || result.EpisodeNum != 1 {
+		t.Fatalf("processFile() = %+v, want exact-subtitle OVA episode 1", result)
+	}
+	if graphqlRequests != 3 {
+		t.Errorf("GraphQL requests = %d, want initial, related, and special searches", graphqlRequests)
+	}
+}
+
 func TestMatchNumberedDateAcrossWorksRejectsMultipleProofs(t *testing.T) {
 	syobocalServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tid := r.URL.Query().Get("TID")

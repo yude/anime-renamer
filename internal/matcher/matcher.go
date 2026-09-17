@@ -33,6 +33,7 @@ const (
 )
 
 var seriesContinuationPattern = regexp.MustCompile(`^(?:第?[0-9]+(?:期|クール(?:目)?)|season[0-9]+|[0-9]+(?:st|nd|rd|th)(?:season|シーズン)|シーズン[0-9]+|part[0-9]+|netflixオリジナル|tv放送)`)
+var specialWorkContinuationPattern = regexp.MustCompile(`^(?:ova|oad|特別編|special)`)
 var parentheticalWorkYearPattern = regexp.MustCompile(`[（(]([0-9]{4})(?:年版)?[）)]`)
 
 var episodeNumberTextPattern = regexp.MustCompile(`(?i)^(?:第\s*([0-9]+)\s*(?:話|幕|番|怪|夜|回|局|羽|R)|#\s*([0-9]+)|episode[.\s]*([0-9]+)|sailing\s*([0-9]+)|ride[.\s]*([0-9]+)|([0-9]+))$`)
@@ -239,12 +240,14 @@ func match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 			result.Episode = episode
 			if displayed, ok := episodeLabelNumber(episode); ok && displayed == meta.EpisodeNumber {
 				result.OutputEpisodeNumber = displayed
+			} else if specialSortNumberMatches(episode, meta.EpisodeNumber, meta.Subtitle) {
+				result.OutputEpisodeNumber = meta.EpisodeNumber
 			}
 			result.Confidence += 40
 			result.Reasons = append(result.Reasons, "work title match")
 
 			result.Confidence += 30
-			matchedNumber, _ := EpisodeNumber(episode)
+			matchedNumber, _ := MatchResultEpisodeNumber(result)
 			if matchedNumber == episodeNumberForMatch {
 				result.Reasons = append(result.Reasons, fmt.Sprintf("episode number %d matched", episodeNumberForMatch))
 			} else if meta.Subtitle != "" && episode.Title != "" && subtitlesEquivalent(episode.Title, meta.Subtitle) {
@@ -522,6 +525,29 @@ func MatchingRelatedWorks(title string, works []annict.Work) []annict.Work {
 	return matches
 }
 
+// MatchingSpecialWorks returns only explicitly labelled special productions
+// whose title extends the parsed base title. It is intentionally separate
+// from MatchingRelatedWorks so an OVA can never compete with normal TV
+// episodes during the primary match.
+func MatchingSpecialWorks(title string, works []annict.Work) []annict.Work {
+	baseTitle := normalize.NormalizeTitleForMatch(title)
+	if baseTitle == "" {
+		return nil
+	}
+	var matches []annict.Work
+	for _, work := range works {
+		workTitle := normalize.NormalizeTitleForMatch(work.Title)
+		if !strings.HasPrefix(workTitle, baseTitle) {
+			continue
+		}
+		suffix := strings.TrimPrefix(workTitle, baseTitle)
+		if specialWorkContinuationPattern.MatchString(suffix) {
+			matches = append(matches, work)
+		}
+	}
+	return matches
+}
+
 // narrowBySeason filters works by season year and name.
 func narrowBySeason(works []annict.Work, seasonYear int, seasonName string) []annict.Work {
 	seasonPrefix := fmt.Sprintf("%d-%s", seasonYear, seasonName)
@@ -775,6 +801,8 @@ func findMatchingEpisode(number int, subtitle string, episodes []annict.Episode)
 	labelAndSubtitleAmbiguous := false
 	var numberMatch *annict.Episode
 	var numberAndSubtitleMatch *annict.Episode
+	var specialSortAndSubtitleMatch *annict.Episode
+	specialSortAndSubtitleAmbiguous := false
 	var subtitleMatch *annict.Episode
 	subtitleAmbiguous := false
 
@@ -813,6 +841,13 @@ func findMatchingEpisode(number int, subtitle string, episodes []annict.Episode)
 				subtitleMatch = e
 			}
 		}
+		if specialSortNumberMatches(e, number, subtitle) {
+			if specialSortAndSubtitleMatch != nil {
+				specialSortAndSubtitleAmbiguous = true
+			} else {
+				specialSortAndSubtitleMatch = e
+			}
+		}
 	}
 
 	// An explicit public label is stronger than a work-local Number.
@@ -822,6 +857,9 @@ func findMatchingEpisode(number int, subtitle string, episodes []annict.Episode)
 	// Prefer exact number+subtitle match
 	if numberAndSubtitleMatch != nil {
 		return numberAndSubtitleMatch
+	}
+	if specialSortAndSubtitleMatch != nil && !specialSortAndSubtitleAmbiguous {
+		return specialSortAndSubtitleMatch
 	}
 	// A unique exact subtitle is stronger evidence than a conflicting local
 	// number. Some EPGs count an episode zero as local #1 while Annict retains
@@ -871,6 +909,16 @@ func findMatchingEpisode(number int, subtitle string, episodes []annict.Episode)
 		return localMatch
 	}
 	return nil
+}
+
+func specialSortNumberMatches(episode *annict.Episode, number int, subtitle string) bool {
+	if episode == nil || episode.Number != nil || strings.TrimSpace(episode.NumberText) == "" || episode.SortNumber != number || number <= 0 || subtitle == "" || episode.Title == "" {
+		return false
+	}
+	if _, supported := episodeNumberFromText(episode.NumberText); supported {
+		return false
+	}
+	return subtitlesEquivalent(episode.Title, subtitle)
 }
 
 // findMatchingProgram finds a program matching the recording date and episode.

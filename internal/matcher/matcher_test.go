@@ -519,6 +519,30 @@ func TestEpisodeNumberRejectsUnsupportedNumberTextWithoutSortFallback(t *testing
 	}
 }
 
+func TestMatchUsesSortNumberForExactDescriptiveSpecial(t *testing.T) {
+	meta := &parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 26, Subtitle: "765プロという物語"}
+	episodes := map[int][]annict.Episode{
+		1: {{ID: 101, NumberText: "特別編", SortNumber: 26, Title: "765プロという物語"}},
+	}
+	result := Match(meta, []annict.Work{{ID: 1, Title: "作品"}}, episodes, nil)
+	if result == nil || result.Episode == nil || result.Episode.ID != 101 || result.Confidence < AutoRenameThreshold {
+		t.Fatalf("Match() = %+v, want exact special episode at confidence >= %d", result, AutoRenameThreshold)
+	}
+	if got, ok := MatchResultEpisodeNumber(result); !ok || got != 26 {
+		t.Fatalf("MatchResultEpisodeNumber() = %d, %v; want 26, true", got, ok)
+	}
+
+	wrong := Match(
+		&parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 26, Subtitle: "別の物語"},
+		[]annict.Work{{ID: 1, Title: "作品"}},
+		episodes,
+		nil,
+	)
+	if wrong == nil || wrong.Confidence >= AutoRenameThreshold {
+		t.Fatalf("Match(wrong subtitle) = %+v, want strict rejection", wrong)
+	}
+}
+
 func TestEpisodeNumberUsesExplicitLabelForFractionalSpecial(t *testing.T) {
 	episode := &annict.Episode{Number: float64Ptr(10.5), NumberText: "第11話", SortNumber: 110}
 	if got, ok := EpisodeNumber(episode); !ok || got != 11 {
@@ -1170,6 +1194,20 @@ func TestMatchingRelatedWorksIncludesOnlyExplicitSeriesContinuations(t *testing.
 		if got[i].ID != wantID {
 			t.Errorf("MatchingRelatedWorks()[%d].ID = %d, want %d", i, got[i].ID, wantID)
 		}
+	}
+}
+
+func TestMatchingSpecialWorksIncludesOnlyExplicitSpecialLabels(t *testing.T) {
+	works := []annict.Work{
+		{ID: 1, Title: "作品2"},
+		{ID: 2, Title: "作品2 OVA"},
+		{ID: 3, Title: "作品2 特別編"},
+		{ID: 4, Title: "作品2 第2期"},
+		{ID: 5, Title: "作品2 劇場版"},
+	}
+	got := MatchingSpecialWorks("作品2", works)
+	if len(got) != 2 || got[0].ID != 2 || got[1].ID != 3 {
+		t.Fatalf("MatchingSpecialWorks() = %+v, want explicit OVA and 特別編 only", got)
 	}
 }
 
