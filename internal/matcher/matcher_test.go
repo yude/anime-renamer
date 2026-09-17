@@ -434,12 +434,69 @@ func TestEpisodeNumberUsesNumberTextBeforeInternalSortOrder(t *testing.T) {
 		{text: "episode 2", want: 2},
 		{text: "EPISODE.12", want: 12},
 		{text: "SAILING 26", want: 26},
+		{text: "RIDE.8", want: 8},
 		{text: "第十四話", want: 14},
 	} {
 		episode := &annict.Episode{NumberText: tt.text, SortNumber: tt.want * 10}
 		if got, ok := EpisodeNumber(episode); !ok || got != tt.want {
 			t.Errorf("EpisodeNumber(NumberText=%q, SortNumber=%d) = %d, %v; want %d, true", tt.text, episode.SortNumber, got, ok, tt.want)
 		}
+	}
+}
+
+func TestMatchPrefersExplicitEpisodeLabelAcrossWorks(t *testing.T) {
+	works := []annict.Work{
+		{ID: 1, Title: "作品"},
+		{ID: 2, Title: "作品"},
+	}
+	meta := &parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 1}
+	episodesByWork := map[int][]annict.Episode{
+		1: {{ID: 101, Number: float64Ptr(1), NumberText: "#1", Title: "本編"}},
+		2: {{ID: 201, Number: float64Ptr(1), NumberText: "#11", Title: "特別編"}},
+	}
+
+	result := Match(meta, works, episodesByWork, nil)
+	if result == nil || result.Work == nil || result.Work.ID != 1 {
+		t.Fatalf("Match() = %+v, want work 1 selected by its explicit #1 label", result)
+	}
+	if result.Confidence < AutoRenameThreshold {
+		t.Fatalf("Confidence = %d, want >= %d (reasons: %v)", result.Confidence, AutoRenameThreshold, result.Reasons)
+	}
+	if got, ok := MatchResultEpisodeNumber(result); !ok || got != 1 {
+		t.Fatalf("MatchResultEpisodeNumber() = %d, %v; want 1, true", got, ok)
+	}
+}
+
+func TestMatchUsesExplicitDisplayNumberWithinWork(t *testing.T) {
+	works := []annict.Work{{ID: 1, Title: "作品"}}
+	meta := &parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 44}
+	episodesByWork := map[int][]annict.Episode{
+		1: {{ID: 101, Number: float64Ptr(5), NumberText: "第44話", Title: "第四十四話"}},
+	}
+
+	result := Match(meta, works, episodesByWork, nil)
+	if result == nil || result.Episode == nil || result.Episode.ID != 101 {
+		t.Fatalf("Match() = %+v, want episode 101 selected by 第44話", result)
+	}
+	if result.Confidence < AutoRenameThreshold {
+		t.Fatalf("Confidence = %d, want >= %d (reasons: %v)", result.Confidence, AutoRenameThreshold, result.Reasons)
+	}
+	if got, ok := MatchResultEpisodeNumber(result); !ok || got != 44 {
+		t.Fatalf("MatchResultEpisodeNumber() = %d, %v; want 44, true", got, ok)
+	}
+}
+
+func TestMatchRejectsAmbiguousExplicitEpisodeLabels(t *testing.T) {
+	works := []annict.Work{{ID: 1, Title: "作品"}, {ID: 2, Title: "作品"}}
+	meta := &parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 1}
+	episodesByWork := map[int][]annict.Episode{
+		1: {{ID: 101, Number: float64Ptr(7), NumberText: "#1"}},
+		2: {{ID: 201, Number: float64Ptr(8), NumberText: "#1"}},
+	}
+
+	result := Match(meta, works, episodesByWork, nil)
+	if result == nil || result.Confidence != 0 {
+		t.Fatalf("Match() = %+v, want a safe ambiguous result", result)
 	}
 }
 

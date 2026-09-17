@@ -52,6 +52,16 @@ func TestBuildPath(t *testing.T) {
 			wantPath: "/recordings/作品/作品 #10 「テスト」.mp4",
 		},
 		{
+			name:         "matched public label overrides work-local number",
+			originalPath: "/recordings/作品 第44話.mp4",
+			match: &matcher.MatchResult{
+				Work:                &annict.Work{ID: 1, Title: "作品"},
+				Episode:             &annict.Episode{ID: 1, Number: float64Ptr(5), NumberText: "第44話", Title: "第四十四話"},
+				OutputEpisodeNumber: 44,
+			},
+			wantPath: "/recordings/作品/作品 #44 「第四十四話」.mp4",
+		},
+		{
 			name:         "preserve transport stream extension",
 			originalPath: "/recordings/作品 ep.7「テスト」 (20260801).ts",
 			match: &matcher.MatchResult{

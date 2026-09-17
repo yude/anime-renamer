@@ -18,12 +18,13 @@ import (
 
 // MatchResult holds the result of matching a recording to Annict data.
 type MatchResult struct {
-	Work         *annict.Work
-	Episode      *annict.Episode
-	Program      *annict.Program
-	Confidence   int
-	Reasons      []string
-	FileSubtitle string // Subtitle parsed from filename, used when Annict has no subtitle
+	Work                *annict.Work
+	Episode             *annict.Episode
+	Program             *annict.Program
+	Confidence          int
+	Reasons             []string
+	FileSubtitle        string // Subtitle parsed from filename, used when Annict has no subtitle
+	OutputEpisodeNumber int    // Explicit public label matched in the filename, when different from Annict's local Number
 }
 
 // Confidence thresholds
@@ -33,7 +34,7 @@ const (
 
 var seriesContinuationPattern = regexp.MustCompile(`^(?:第?[0-9]+(?:期|クール(?:目)?)|season[0-9]+|[0-9]+(?:st|nd|rd|th)(?:season|シーズン)|シーズン[0-9]+|part[0-9]+|netflixオリジナル|tv放送)`)
 
-var episodeNumberTextPattern = regexp.MustCompile(`(?i)^(?:第\s*([0-9]+)\s*(?:話|幕|番|怪|夜|回|局|羽|R)|#\s*([0-9]+)|episode[.\s]*([0-9]+)|sailing\s*([0-9]+)|([0-9]+))$`)
+var episodeNumberTextPattern = regexp.MustCompile(`(?i)^(?:第\s*([0-9]+)\s*(?:話|幕|番|怪|夜|回|局|羽|R)|#\s*([0-9]+)|episode[.\s]*([0-9]+)|sailing\s*([0-9]+)|ride[.\s]*([0-9]+)|([0-9]+))$`)
 var kanjiEpisodeNumberTextPattern = regexp.MustCompile(`^第\s*([〇一二三四五六七八九十百千壱弐参肆伍陸漆捌玖拾]+)\s*(?:話|幕|番|怪|夜|回|局|羽|R)$`)
 var subtitleSegmentOrdinalPrefix = regexp.MustCompile(`(?i)^(?:episode[0-9]+|其の[0-9一二三四五六七八九十]+|[a-z]:)`)
 var subtitleEpisodeLabelPrefix = regexp.MustCompile(`(?i)^(?:life[.\s]*(?:[0-9]+|max(?:imum)?)(?:\s*vs\s*power[.\s]*max(?:imum)?)?|コミュ[0-9]+)`)
@@ -228,6 +229,9 @@ func match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 		episode := findMatchingEpisode(episodeNumberForMatch, meta.Subtitle, episodes)
 		if episode != nil {
 			result.Episode = episode
+			if displayed, ok := episodeLabelNumber(episode); ok && displayed == meta.EpisodeNumber {
+				result.OutputEpisodeNumber = displayed
+			}
 			result.Confidence += 40
 			result.Reasons = append(result.Reasons, "work title match")
 
@@ -522,6 +526,9 @@ type episodeNumberNarrowing struct {
 // if the episode number exceeds the first cour's count, tries to match against the 2nd cour
 // with an offset.
 func narrowByEpisodeNumber(works []annict.Work, episodeNum int, subtitle string, episodesByWork map[int][]annict.Episode) *episodeNumberNarrowing {
+	var labelMatch *annict.Work
+	var labelAndSubtitleMatch *episodeNumberNarrowing
+	labelAmbiguous := false
 	var numberMatch *annict.Work
 	var numberAndSubtitleMatch *episodeNumberNarrowing
 	numberAmbiguous := false
@@ -530,6 +537,7 @@ func narrowByEpisodeNumber(works []annict.Work, episodeNum int, subtitle string,
 		episodes := episodesByWork[works[i].ID]
 		for j := range episodes {
 			effectiveNumber, numberOK := EpisodeNumber(&episodes[j])
+			labelNumber, labelOK := episodeLabelNumber(&episodes[j])
 			subtitleOK := subtitle != "" && episodes[j].Title != "" && subtitlesEquivalent(episodes[j].Title, subtitle)
 			if subtitleOK && numberOK {
 				subtitleMatches = append(subtitleMatches, episodeNumberNarrowing{Work: &works[i], EpisodeNumber: effectiveNumber})
@@ -548,10 +556,30 @@ func narrowByEpisodeNumber(works []annict.Work, episodeNum int, subtitle string,
 					numberMatch = &works[i]
 				}
 			}
+			if labelOK && labelNumber == episodeNum {
+				if subtitleOK {
+					match := episodeNumberNarrowing{Work: &works[i], EpisodeNumber: effectiveNumber}
+					if labelAndSubtitleMatch != nil && labelAndSubtitleMatch.Work.ID != works[i].ID {
+						return nil
+					}
+					labelAndSubtitleMatch = &match
+				}
+				if labelMatch != nil && labelMatch.ID != works[i].ID {
+					labelAmbiguous = true
+				} else {
+					labelMatch = &works[i]
+				}
+			}
 		}
+	}
+	if labelAndSubtitleMatch != nil {
+		return labelAndSubtitleMatch
 	}
 	if numberAndSubtitleMatch != nil {
 		return numberAndSubtitleMatch
+	}
+	if labelMatch != nil && !labelAmbiguous {
+		return &episodeNumberNarrowing{Work: labelMatch, EpisodeNumber: episodeNum}
 	}
 	if numberMatch != nil && !numberAmbiguous {
 		return &episodeNumberNarrowing{Work: numberMatch, EpisodeNumber: episodeNum}
@@ -649,6 +677,27 @@ func EpisodeNumber(e *annict.Episode) (int, bool) {
 	return e.SortNumber, e.SortNumber > 0
 }
 
+// MatchResultEpisodeNumber returns the public episode number selected for a
+// filename. Annict sometimes stores a local Number while NumberText carries
+// the continuous broadcast label (for example Number=5, NumberText=第44話).
+// The override is populated only when that explicit label matched the input.
+func MatchResultEpisodeNumber(result *MatchResult) (int, bool) {
+	if result == nil || result.Episode == nil {
+		return 0, false
+	}
+	if result.OutputEpisodeNumber > 0 {
+		return result.OutputEpisodeNumber, true
+	}
+	return EpisodeNumber(result.Episode)
+}
+
+func episodeLabelNumber(e *annict.Episode) (int, bool) {
+	if e == nil || strings.TrimSpace(e.NumberText) == "" {
+		return 0, false
+	}
+	return episodeNumberFromText(e.NumberText)
+}
+
 func episodeNumberFromText(text string) (int, bool) {
 	numberText := normalize.Normalize(strings.TrimSpace(text))
 	if matches := episodeNumberTextPattern.FindStringSubmatch(numberText); matches != nil {
@@ -677,6 +726,10 @@ func episodeNumberMatches(e *annict.Episode, number int) bool {
 
 // findMatchingEpisode finds an episode matching the given number and subtitle.
 func findMatchingEpisode(number int, subtitle string, episodes []annict.Episode) *annict.Episode {
+	var labelMatch *annict.Episode
+	var labelAndSubtitleMatch *annict.Episode
+	labelAmbiguous := false
+	labelAndSubtitleAmbiguous := false
 	var numberMatch *annict.Episode
 	var numberAndSubtitleMatch *annict.Episode
 	var subtitleMatch *annict.Episode
@@ -685,6 +738,20 @@ func findMatchingEpisode(number int, subtitle string, episodes []annict.Episode)
 	for i := range episodes {
 		e := &episodes[i]
 
+		if labelNumber, ok := episodeLabelNumber(e); ok && labelNumber == number {
+			if labelMatch != nil {
+				labelAmbiguous = true
+			} else {
+				labelMatch = e
+			}
+			if subtitle != "" && e.Title != "" && subtitlesEquivalent(e.Title, subtitle) {
+				if labelAndSubtitleMatch != nil {
+					labelAndSubtitleAmbiguous = true
+				} else {
+					labelAndSubtitleMatch = e
+				}
+			}
+		}
 		if episodeNumberMatches(e, number) {
 			if numberMatch == nil {
 				numberMatch = e
@@ -705,6 +772,10 @@ func findMatchingEpisode(number int, subtitle string, episodes []annict.Episode)
 		}
 	}
 
+	// An explicit public label is stronger than a work-local Number.
+	if labelAndSubtitleMatch != nil && !labelAndSubtitleAmbiguous {
+		return labelAndSubtitleMatch
+	}
 	// Prefer exact number+subtitle match
 	if numberAndSubtitleMatch != nil {
 		return numberAndSubtitleMatch
@@ -715,6 +786,9 @@ func findMatchingEpisode(number int, subtitle string, episodes []annict.Episode)
 	// not override the direct number match.
 	if subtitleMatch != nil && !subtitleAmbiguous {
 		return subtitleMatch
+	}
+	if labelMatch != nil && !labelAmbiguous {
+		return labelMatch
 	}
 	// Fall back to number-only match.
 	if numberMatch != nil {

@@ -94,7 +94,7 @@ func BuildPath(originalPath string, result *matcher.MatchResult) (string, error)
 
 	// Episode number: use Number when it is a supported positive integer,
 	// otherwise use SortNumber only when Number is absent.
-	epNum, ok := matcher.EpisodeNumber(result.Episode)
+	epNum, ok := matcher.MatchResultEpisodeNumber(result)
 	if !ok {
 		return "", fmt.Errorf("invalid episode number")
 	}
@@ -227,7 +227,7 @@ func Rename(originalPath string, result *matcher.MatchResult, dryRun bool, outpu
 
 	r.NewPath = newPath
 	r.WorkTitle = result.Work.Title
-	r.EpisodeNum, _ = matcher.EpisodeNumber(result.Episode)
+	r.EpisodeNum, _ = matcher.MatchResultEpisodeNumber(result)
 	r.Subtitle = result.Episode.Title
 	if r.Subtitle == "" {
 		r.Subtitle = result.FileSubtitle

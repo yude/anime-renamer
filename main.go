@@ -508,7 +508,7 @@ func processFile(
 		fmt.Fprintf(os.Stderr, "  Annict detail:\n")
 		fmt.Fprintf(os.Stderr, "    Work:      %s (ID: %d, season: %s)\n", result.Work.Title, result.Work.ID, result.Work.SeasonName)
 		if result.Episode != nil {
-			epNum, _ := matcher.EpisodeNumber(result.Episode)
+			epNum, _ := matcher.MatchResultEpisodeNumber(result)
 			fmt.Fprintf(os.Stderr, "    Episode:   %d - %s (ID: %d)\n", epNum, result.Episode.Title, result.Episode.ID)
 		}
 		if result.Program != nil {
@@ -869,7 +869,7 @@ func observeScheduleAnchor(meta *parser.RecordingMetadata, result *matcher.Match
 	if channelID <= 0 {
 		return "", errors.New(reason)
 	}
-	episodeNumber, _ := matcher.EpisodeNumber(result.Episode)
+	episodeNumber, _ := matcher.MatchResultEpisodeNumber(result)
 	key := fmt.Sprintf("%s:%d", meta.RecordedDate.In(time.FixedZone("JST", 9*60*60)).Format("2006-01-02"), episodeNumber)
 	batch.record(result.Work.ID, channelID, key)
 	return reason, nil
