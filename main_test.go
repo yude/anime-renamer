@@ -894,6 +894,38 @@ func TestProcessFileUsesExactSubtitleForExplicitOVA(t *testing.T) {
 	}
 }
 
+func TestSearchSpecialWorksRejectsAmbiguousCandidatesBeforeEpisodeFetch(t *testing.T) {
+	restRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/graphql" {
+			restRequests++
+			http.Error(w, "unexpected episode fetch", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[
+			{"node":{"annictId":1,"title":"作品 OVA","episodesCount":2,"episodes":{"edges":[]}}},
+			{"node":{"annictId":2,"title":"作品 特別編","episodesCount":2,"episodes":{"edges":[]}}}
+		]}}}`)
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	works, err := searchSpecialWorks(
+		annict.NewClientWithURLs("token", server.URL, server.URL+"/graphql"),
+		cache.NewDisabled(filepath.Join(dir, "cache")),
+		"作品",
+		make(map[string][]annict.Work),
+		make(map[int][]annict.Episode),
+	)
+	if err != nil || len(works) != 0 {
+		t.Fatalf("searchSpecialWorks() = %+v, %v; want safe empty result", works, err)
+	}
+	if restRequests != 0 {
+		t.Fatalf("REST episode fetches = %d, want 0 for ambiguous specials", restRequests)
+	}
+}
+
 func TestMatchNumberedDateAcrossWorksRejectsMultipleProofs(t *testing.T) {
 	syobocalServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tid := r.URL.Query().Get("TID")

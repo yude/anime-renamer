@@ -483,7 +483,7 @@ func processFile(
 			fmt.Fprintf(os.Stderr, "  Fallback:  found a stronger match in an explicitly named related work\n")
 		}
 	}
-	if meta.Subtitle != "" && (result.Episode == nil || result.Confidence < matcher.AutoRenameThreshold) {
+	if meta.Subtitle != "" && result.Episode == nil {
 		specialWorks, specialErr := searchSpecialWorks(client, c, meta.WorkTitle, workCache, episodesCache)
 		if specialErr != nil {
 			if verbose {
@@ -1061,6 +1061,13 @@ func searchSpecialWorks(client *annict.Client, c *cache.Cache, title string, wc 
 		return nil, err
 	}
 	works = matcher.MatchingSpecialWorks(title, works)
+	// A special-work fallback must not fan out over a fuzzy search result.
+	// Requiring one explicitly labelled work both preserves uniqueness and
+	// avoids fetching hundreds of unrelated episode lists for generic titles.
+	if len(works) != 1 {
+		wc[cacheKey] = nil
+		return nil, nil
+	}
 	wc[cacheKey] = works
 
 	for _, work := range works {
