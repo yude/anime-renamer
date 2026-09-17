@@ -771,6 +771,7 @@ func TestMatchSubtitlePresentationVariantsReachThreshold(t *testing.T) {
 		{annict: "俺はひょっとして、最終話でヒロインの横にいるポッと出のモブキャラなのだろうか", file: "俺はひょっとして、最終話で負けヒロインの横にいるポッと出のモブキャラなのだろうか"},
 		{annict: "集う者達", file: "集う物達"},
 		{annict: "水着の一日", file: "水着で１日"},
+		{annict: "つながるもの", file: "つながるものの"},
 	} {
 		episodes := map[int][]annict.Episode{1: {{ID: 100 + i, Number: float64Ptr(1), Title: tt.annict}}}
 		meta := &parser.RecordingMetadata{WorkTitle: "作品", EpisodeNumber: 1, Subtitle: tt.file}

@@ -76,6 +76,7 @@ var subtitleOrthographyReplacer = strings.NewReplacer(
 	"俺はひょっとして、最終話で負けヒロインの横にいるポッと出のモブキャラなのだろうか", "俺はひょっとして、最終話でヒロインの横にいるポッと出のモブキャラなのだろうか",
 	"集う物達", "集う者達",
 	"水着で１日", "水着の1日",
+	"つながるものの", "つながるもの",
 )
 
 // Season mapping from month to Annict season name. Each season is exactly
