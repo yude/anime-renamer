@@ -1261,7 +1261,7 @@ func testProcessFileSkippedWithoutAnnict(t *testing.T, baseName, wantReason stri
 	}
 }
 
-func TestProcessFileDetectsBatchDestinationCollisionInDryRun(t *testing.T) {
+func TestProcessFileNumbersBatchDestinationCollisionInDryRun(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path != "/graphql" {
@@ -1295,11 +1295,12 @@ func TestProcessFileDetectsBatchDestinationCollisionInDryRun(t *testing.T) {
 		t.Fatalf("first processFile() error = %v", firstResult.Error)
 	}
 	secondResult := processFile(second, client, c, workCache, episodesCache, programsCache, plans, true, false, matcher.AutoRenameThreshold, "")
-	if secondResult.Error == nil || !strings.Contains(secondResult.Error.Error(), "batch destination collision") {
-		t.Fatalf("second processFile() error = %v, want batch destination collision", secondResult.Error)
+	if secondResult.Error != nil {
+		t.Fatalf("second processFile() error = %v", secondResult.Error)
 	}
-	if secondResult.NewPath != firstResult.NewPath {
-		t.Errorf("collision paths differ: first=%q second=%q", firstResult.NewPath, secondResult.NewPath)
+	wantSecond := filepath.Join(filepath.Dir(firstResult.NewPath), "duplicate", strings.TrimSuffix(filepath.Base(firstResult.NewPath), ".mp4")+" (1).mp4")
+	if secondResult.NewPath != wantSecond {
+		t.Errorf("second path = %q, want numbered duplicate %q", secondResult.NewPath, wantSecond)
 	}
 	for _, file := range []string{first, second} {
 		if _, err := os.Stat(file); err != nil {

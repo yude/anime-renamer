@@ -111,6 +111,11 @@ func BuildPath(originalPath string, result *matcher.MatchResult) (string, error)
 		// Treat that directory as canonical instead of nesting another copy of
 		// the same title on every run.
 		workDir = dir
+	} else if filepath.Base(dir) == "duplicate" && filepath.Base(filepath.Dir(dir)) == workTitle {
+		// Duplicate recordings live one level below the canonical work
+		// directory. A recursive rerun must resolve them against that canonical
+		// destination instead of creating duplicate/<work>/<work> nesting.
+		workDir = filepath.Dir(dir)
 	}
 
 	// Use the file subtitle when the matcher established that Annict has no
@@ -201,11 +206,19 @@ func BuildDestinationPath(originalPath string, result *matcher.MatchResult, outp
 // preserving the <WorkTitle>/<filename> structure computed by BuildPath.
 // Returns the result of the operation.
 func Rename(originalPath string, result *matcher.MatchResult, dryRun bool, outputDir string) *RenameResult {
+	return RenameWithReservations(originalPath, result, dryRun, outputDir, nil)
+}
+
+// RenameWithReservations is the batch-aware form of Rename. When the
+// canonical destination already exists or has been reserved by an earlier
+// source in the same dry-run, the recording is placed under the work's
+// duplicate directory with the first available one-based suffix.
+func RenameWithReservations(originalPath string, result *matcher.MatchResult, dryRun bool, outputDir string, reserved map[string]string) *RenameResult {
 	r := &RenameResult{
 		OriginalPath: originalPath,
 	}
 
-	newPath, err := BuildDestinationPath(originalPath, result, outputDir)
+	primaryPath, err := BuildDestinationPath(originalPath, result, outputDir)
 	if err != nil {
 		r.Error = fmt.Errorf("build path: %w", err)
 		return r
@@ -226,7 +239,6 @@ func Rename(originalPath string, result *matcher.MatchResult, dryRun bool, outpu
 		return r
 	}
 
-	r.NewPath = newPath
 	r.WorkTitle = result.Work.Title
 	r.EpisodeNum, _ = matcher.MatchResultEpisodeNumber(result)
 	r.Subtitle = result.Episode.Title
@@ -234,20 +246,16 @@ func Rename(originalPath string, result *matcher.MatchResult, dryRun bool, outpu
 		r.Subtitle = result.FileSubtitle
 	}
 
-	// Check if already at destination
-	if originalPath == newPath {
-		r.Renamed = true
+	newPath, err := availableDestinationPath(originalPath, primaryPath, reserved)
+	if err != nil {
+		r.Error = err
 		return r
 	}
+	r.NewPath = newPath
 
-	// Check destination exists. Lstat also catches dangling symlinks, which
-	// Stat reports as missing even though replacing them would overwrite a
-	// directory entry the user already owns.
-	if _, err := os.Lstat(newPath); err == nil {
-		r.Error = fmt.Errorf("destination already exists: %s", newPath)
-		return r
-	} else if !errors.Is(err, os.ErrNotExist) {
-		r.Error = fmt.Errorf("check destination %s: %w", newPath, err)
+	// Check if already at the canonical or numbered duplicate destination.
+	if filepath.Clean(originalPath) == filepath.Clean(newPath) {
+		r.Renamed = true
 		return r
 	}
 
@@ -262,6 +270,13 @@ func Rename(originalPath string, result *matcher.MatchResult, dryRun bool, outpu
 		r.Error = fmt.Errorf("create directory %s: %w", dir, err)
 		return r
 	}
+	if info, err := os.Lstat(dir); err != nil {
+		r.Error = fmt.Errorf("check destination directory %s: %w", dir, err)
+		return r
+	} else if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		r.Error = fmt.Errorf("destination directory is not a real directory: %s", dir)
+		return r
+	}
 
 	// Perform rename
 	if err := moveFile(originalPath, newPath); err != nil {
@@ -271,6 +286,76 @@ func Rename(originalPath string, result *matcher.MatchResult, dryRun bool, outpu
 
 	r.Renamed = true
 	return r
+}
+
+func availableDestinationPath(originalPath, primaryPath string, reserved map[string]string) (string, error) {
+	available, err := destinationAvailable(originalPath, primaryPath, reserved)
+	if err != nil {
+		return "", err
+	}
+	if available {
+		return primaryPath, nil
+	}
+
+	duplicateDir := filepath.Join(filepath.Dir(primaryPath), "duplicate")
+	if info, err := os.Lstat(duplicateDir); err == nil {
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return "", fmt.Errorf("duplicate destination is not a real directory: %s", duplicateDir)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("check duplicate destination %s: %w", duplicateDir, err)
+	}
+
+	for sequence := 1; sequence < 1_000_000_000; sequence++ {
+		name, err := numberedDuplicateFilename(filepath.Base(primaryPath), sequence)
+		if err != nil {
+			return "", err
+		}
+		candidate := filepath.Join(duplicateDir, name)
+		available, err := destinationAvailable(originalPath, candidate, reserved)
+		if err != nil {
+			return "", err
+		}
+		if available {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("no duplicate sequence available for %s", primaryPath)
+}
+
+func destinationAvailable(originalPath, candidate string, reserved map[string]string) (bool, error) {
+	cleanCandidate := filepath.Clean(candidate)
+	if filepath.Clean(originalPath) == cleanCandidate {
+		return true, nil
+	}
+	if _, exists := reserved[cleanCandidate]; exists {
+		return false, nil
+	}
+	if _, err := os.Lstat(candidate); err == nil {
+		return false, nil
+	} else if errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	} else {
+		return false, fmt.Errorf("check destination %s: %w", candidate, err)
+	}
+}
+
+func numberedDuplicateFilename(filename string, sequence int) (string, error) {
+	if sequence <= 0 {
+		return "", fmt.Errorf("duplicate sequence must be positive")
+	}
+	ext := filepath.Ext(filename)
+	stem := strings.TrimSuffix(filename, ext)
+	suffix := fmt.Sprintf(" (%d)%s", sequence, ext)
+	remaining := maxFilenameBytes - len(suffix)
+	if remaining <= 0 {
+		return "", fmt.Errorf("duplicate suffix and extension exceed filename limit")
+	}
+	stem = truncateUTF8WithEllipsis(stem, remaining)
+	if stem == "" {
+		return "", fmt.Errorf("duplicate filename is empty after truncation")
+	}
+	return stem + suffix, nil
 }
 
 // moveFile moves src to dst without ever replacing an existing destination.

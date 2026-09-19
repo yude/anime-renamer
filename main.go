@@ -579,35 +579,20 @@ func processFile(
 		}
 	}
 
-	// Step 7: Reserve the batch destination before renaming. The filesystem
-	// no-replace checks still protect against pre-existing entries; this map
-	// additionally catches two sources in the same batch that would otherwise
-	// both appear valid during a dry-run.
-	plannedPath, err := renamer.BuildDestinationPath(file, result, outputDir)
-	if err != nil {
-		return &renamer.RenameResult{
-			OriginalPath: file,
-			Error:        fmt.Errorf("build destination: %w", err),
-		}
-	}
-	planKey := filepath.Clean(plannedPath)
-	if previousSource, exists := plannedDestinations[planKey]; exists && previousSource != file {
-		return &renamer.RenameResult{
-			OriginalPath: file,
-			NewPath:      plannedPath,
-			Error:        fmt.Errorf("batch destination collision: %s is also planned from %s", plannedPath, previousSource),
-		}
-	}
-
-	// Step 8: Rename (or preview in dry-run mode). outputDir, if set, is
-	// honored for both the actual move and the dry-run preview.
-	result2 := renamer.Rename(file, result, dryRun, outputDir)
+	// Step 7: Rename (or preview in dry-run mode). Existing filesystem entries
+	// and earlier batch reservations are preserved under duplicate/ with a
+	// one-based suffix instead of being overwritten or dropped.
+	result2 := renamer.RenameWithReservations(file, result, dryRun, outputDir, plannedDestinations)
 	if result2.Error != nil {
 		return result2
 	}
-	plannedDestinations[planKey] = file
+	plannedDestinations[filepath.Clean(result2.NewPath)] = file
 
-	fmt.Fprintf(os.Stderr, "  Rename:    %s\n", filepath.Base(result2.NewPath))
+	displayPath := filepath.Base(result2.NewPath)
+	if filepath.Base(filepath.Dir(result2.NewPath)) == "duplicate" {
+		displayPath = filepath.Join("duplicate", displayPath)
+	}
+	fmt.Fprintf(os.Stderr, "  Rename:    %s\n", displayPath)
 	return result2
 }
 

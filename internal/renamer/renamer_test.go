@@ -372,8 +372,52 @@ func TestRenameExistingDestination(t *testing.T) {
 	}
 
 	r := Rename(src, result, false, "")
-	if r.Error == nil {
-		t.Error("Rename() should error when destination exists")
+	if r.Error != nil || !r.Renamed {
+		t.Fatalf("Rename() = %+v, want successful duplicate move", r)
+	}
+	want := filepath.Join(dir, "作品", "duplicate", "作品 #7 「テスト」 (1).mp4")
+	if r.NewPath != want {
+		t.Errorf("Rename() NewPath = %q, want %q", r.NewPath, want)
+	}
+	if got, err := os.ReadFile(dst); err != nil || string(got) != "existing" {
+		t.Errorf("canonical destination changed: content=%q error=%v", got, err)
+	}
+	if got, err := os.ReadFile(want); err != nil || string(got) != "test" {
+		t.Errorf("duplicate recording missing: content=%q error=%v", got, err)
+	}
+}
+
+func TestRenameExistingDestinationUsesNextDuplicateSequence(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "test.mp4")
+	workDir := filepath.Join(dir, "作品")
+	duplicateDir := filepath.Join(workDir, "duplicate")
+	dst := filepath.Join(workDir, "作品 #7 「テスト」.mp4")
+	for path, content := range map[string]string{
+		src: "source",
+		dst: "canonical",
+		filepath.Join(duplicateDir, "作品 #7 「テスト」 (1).mp4"): "duplicate 1",
+		filepath.Join(duplicateDir, "作品 #7 「テスト」 (2).mp4"): "duplicate 2",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result := &matcher.MatchResult{
+		Work:    &annict.Work{ID: 1, Title: "作品"},
+		Episode: &annict.Episode{ID: 1, Number: float64Ptr(7), Title: "テスト"},
+	}
+	r := Rename(src, result, false, "")
+	want := filepath.Join(duplicateDir, "作品 #7 「テスト」 (3).mp4")
+	if r.Error != nil || !r.Renamed || r.NewPath != want {
+		t.Fatalf("Rename() = %+v, want duplicate path %q", r, want)
+	}
+	if got, err := os.ReadFile(want); err != nil || string(got) != "source" {
+		t.Errorf("third duplicate content=%q error=%v", got, err)
 	}
 }
 
@@ -400,14 +444,44 @@ func TestRenameDanglingSymlinkDestination(t *testing.T) {
 		Episode: &annict.Episode{ID: 1, Number: float64Ptr(7), Title: "テスト"},
 	}
 	r := Rename(src, result, false, "")
-	if r.Error == nil {
-		t.Fatal("Rename() should reject a dangling symlink destination")
+	if r.Error != nil || !r.Renamed {
+		t.Fatalf("Rename() = %+v, want safe duplicate move", r)
 	}
 	if _, err := os.Lstat(dst); err != nil {
 		t.Errorf("destination symlink should remain untouched: %v", err)
 	}
-	if got, err := os.ReadFile(src); err != nil || string(got) != "source" {
-		t.Errorf("source changed: content=%q error=%v", got, err)
+	want := filepath.Join(dir, "作品", "duplicate", "作品 #7 「テスト」 (1).mp4")
+	if got, err := os.ReadFile(want); err != nil || string(got) != "source" {
+		t.Errorf("duplicate recording content=%q error=%v", got, err)
+	}
+}
+
+func TestRenameDuplicateRerunIsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	workDir := filepath.Join(dir, "作品")
+	duplicateDir := filepath.Join(workDir, "duplicate")
+	canonical := filepath.Join(workDir, "作品 #1 「第一話」.mp4")
+	src := filepath.Join(duplicateDir, "作品 #1 「第一話」 (1).mp4")
+	if err := os.MkdirAll(duplicateDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(canonical, []byte("canonical"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("duplicate"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result := &matcher.MatchResult{
+		Work:    &annict.Work{ID: 1, Title: "作品"},
+		Episode: &annict.Episode{ID: 1, Number: float64Ptr(1), Title: "第一話"},
+	}
+
+	r := Rename(src, result, false, "")
+	if r.Error != nil || !r.Renamed || r.NewPath != src {
+		t.Fatalf("Rename() = %+v, want successful no-op at %q", r, src)
+	}
+	if got, err := os.ReadFile(src); err != nil || string(got) != "duplicate" {
+		t.Errorf("duplicate changed: content=%q error=%v", got, err)
 	}
 }
 
@@ -475,8 +549,8 @@ func TestRenameWithOutputDirPreservesWorkDirectoryForOrganizedInput(t *testing.T
 }
 
 func TestRenameDryRunReportsExistingDestination(t *testing.T) {
-	// Regression test: dry-run must surface the same "already exists"
-	// error an actual run would, so previews are accurate.
+	// Regression test: dry-run must preview the same numbered duplicate path
+	// an actual run would choose without touching either source or destination.
 	dir := t.TempDir()
 	src := filepath.Join(dir, "test.mp4")
 	dst := filepath.Join(dir, "作品", "作品 #7 「テスト」.mp4")
@@ -497,11 +571,15 @@ func TestRenameDryRunReportsExistingDestination(t *testing.T) {
 	}
 
 	r := Rename(src, result, true, "")
-	if r.Error == nil {
-		t.Error("Rename(dry-run) should report an error when destination exists")
+	want := filepath.Join(dir, "作品", "duplicate", "作品 #7 「テスト」 (1).mp4")
+	if r.Error != nil || !r.Previewed || r.Renamed || r.NewPath != want {
+		t.Fatalf("Rename(dry-run) = %+v, want duplicate preview %q", r, want)
 	}
 	if _, err := os.Stat(src); os.IsNotExist(err) {
 		t.Error("dry-run must not touch the original file")
+	}
+	if _, err := os.Stat(want); !os.IsNotExist(err) {
+		t.Errorf("dry-run created duplicate destination: %v", err)
 	}
 }
 
