@@ -100,7 +100,11 @@ func TestNormalizeTitleForMatch(t *testing.T) {
 		{a: "ツルネ―風舞高校弓道部―アンコール", b: "ツルネ ―風舞高校弓道部―", eq: true},
 		{a: "バンドリ！ ガールズバンドパーティ！ 5th Anniversary Animation", b: "BanG Dream! ガールズバンドパーティ！5th Anniversary Animation -CiRCLE THANKS PARTY!-", eq: true},
 		{a: "バンドリ！ ガールズバンドパーティ！5周年記念アニメ", b: "BanG Dream! ガールズバンドパーティ！5th Anniversary Animation -CiRCLE THANKS PARTY!-", eq: true},
+		{a: "八月のシンデレラナイン２０２１", b: "八月のシンデレラナイン", eq: true},
+		{a: "けいおん！番外編", b: "けいおん！", eq: true},
+		{a: "SAO SELECTION 特別版", b: "ソードアート・オンライン", eq: true},
 		{a: "けいおん！", b: "けいおん！！", eq: false},
+		{a: "SAO SELECTION 1", b: "ソードアート・オンライン", eq: false},
 		{a: "作品 第2期", b: "作品 第3期", eq: false},
 	} {
 		normalizedA := NormalizeTitleForMatch(tt.a)

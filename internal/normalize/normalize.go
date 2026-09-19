@@ -139,6 +139,15 @@ func NormalizeTitleForMatch(s string) string {
 	if key == "バンドリ!ガールズバンドパーテイ!5thanniversaryanimation" || key == "バンドリ!ガールズバンドパーテイ!5周年記念アニメ" {
 		return NormalizeTitleForMatch("BanG Dream! ガールズバンドパーティ！5th Anniversary Animation -CiRCLE THANKS PARTY!-")
 	}
+	if key == "八月のシンデレラナイン2021" {
+		return NormalizeTitleForMatch("八月のシンデレラナイン")
+	}
+	if key == "けいおん!番外編" {
+		return NormalizeTitleForMatch("けいおん！")
+	}
+	if key == "saoselection特別版" {
+		return NormalizeTitleForMatch("ソードアート・オンライン")
+	}
 	return key
 }
 
