@@ -44,6 +44,9 @@ func TestParseFilenameUnsupportedEpisodeError(t *testing.T) {
 	for _, input := range []string{
 		"作品 第0話「前日譚」.mp4",
 		"作品 第〇話「前日譚」.mp4",
+		"作品 第3話エンディング映像 「特別ED」.mp4",
+		"作品 特番 第1話オーディオコメンタリー#.mp4",
+		"作品 全12話総集編#.mp4",
 	} {
 		if _, err := ParseFilename(input); !errors.Is(err, ErrUnsupportedEpisode) {
 			t.Errorf("ParseFilename(%q) error = %v, want ErrUnsupportedEpisode", input, err)

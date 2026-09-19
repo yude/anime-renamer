@@ -55,6 +55,8 @@ var (
 	separatedHashEpisodes            = regexp.MustCompile(`[#＃♯][\s\x{3000}]*[0-9０-９]+[^#＃♯]*(?:[／/]|[」』])[\s\x{3000}]*[#＃♯][\s\x{3000}]*[0-9０-９]+(?:[\s\x{3000}]|[「『]|$)`)
 	separatedNumberedEpisodes        = regexp.MustCompile(`(?:第[\s\x{3000}]*)?[0-9０-９]+[\s\x{3000}]*話.*[,，、／/][\s\x{3000}]*(?:第[\s\x{3000}]*)?[0-9０-９]+[\s\x{3000}]*話`)
 	parenthesizedEpisodeRangePattern = regexp.MustCompile(`[（(][\s\x{3000}]*[0-9０-９]{1,3}[\s\x{3000}]*[）)][\s\x{3000}]*[~〜～－―ー-][\s\x{3000}]*[（(][\s\x{3000}]*[0-9０-９]{1,3}[\s\x{3000}]*[）)]`)
+	numberedSupplementPattern        = regexp.MustCompile(`第[\s\x{3000}]*[0-9０-９]+[\s\x{3000}]*話[\s\x{3000}]*(?:エンディング映像|オーディオコメンタリー)`)
+	allEpisodeRecapPattern           = regexp.MustCompile(`全[\s\x{3000}]*[0-9０-９]+[\s\x{3000}]*話[\s\x{3000}]*総集編`)
 
 	// Episode patterns matching both full-width and half-width forms.
 	// These run against the ORIGINAL string (pre-normalization).
@@ -349,6 +351,11 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 	remaining = strings.ReplaceAll(remaining, "\u3000", "")
 	if strings.TrimSpace(remaining) == "" {
 		return nil, fmt.Errorf("%w in filename: %q", ErrNoMeaningfulContent, filename)
+	}
+	for _, pattern := range []*regexp.Regexp{numberedSupplementPattern, allEpisodeRecapPattern} {
+		if notation := pattern.FindString(name); notation != "" {
+			return nil, fmt.Errorf("%w non-episode content %q in %q", ErrUnsupportedEpisode, notation, filename)
+		}
 	}
 	if notation := ambiguousEpisodeNotation(name); notation != "" {
 		return nil, fmt.Errorf("%w %q in %q", ErrAmbiguousEpisode, notation, filename)
