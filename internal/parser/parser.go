@@ -101,6 +101,7 @@ var (
 	finalEpisodeTagPattern         = regexp.MustCompile(`[\[［]終[\]］]`)
 	finalEpisodeSuffixPattern      = regexp.MustCompile(`[\s\x{3000}]*(?:最終話|最終回).*$`)
 	incompleteEpisodePrefixPattern = regexp.MustCompile(`(?:第[\s\x{3000}]*[0-9０-９]+|[#＃♯])[\s\x{3000}]*$`)
+	explicitSpecialSuffixPattern   = regexp.MustCompile(`(?i)(?:\b(?:OVA|OAD|Special(?:\s+Episode)?)|特別編)[\s\x{3000}]*$`)
 
 	// Metadata tag patterns to strip from filenames (SCRename rp1 equivalent).
 	metadataTagPatterns = []*regexp.Regexp{
@@ -575,10 +576,32 @@ func trailingQuotedContent(s string) (string, string, bool) {
 		return "", "", false
 	}
 	prefix := strings.TrimSpace(string(runes[:lastStart]))
-	if prefix == "" || incompleteEpisodePrefixPattern.MatchString(prefix) {
+	content := strings.TrimSpace(string(runes[lastContentStart:lastEnd]))
+	if prefix == "" {
 		return "", "", false
 	}
-	return prefix, strings.TrimSpace(string(runes[lastContentStart:lastEnd])), true
+	if incompleteEpisodePrefixPattern.MatchString(prefix) {
+		if content == "" {
+			return "", "", false
+		}
+		switch {
+		case strings.HasSuffix(prefix, "#"):
+			prefix = strings.TrimSpace(strings.TrimSuffix(prefix, "#"))
+		case strings.HasSuffix(prefix, "＃"):
+			prefix = strings.TrimSpace(strings.TrimSuffix(prefix, "＃"))
+		case strings.HasSuffix(prefix, "♯"):
+			prefix = strings.TrimSpace(strings.TrimSuffix(prefix, "♯"))
+		default:
+			return "", "", false
+		}
+		if prefix == "" {
+			return "", "", false
+		}
+		if !explicitSpecialSuffixPattern.MatchString(prefix) {
+			return "", "", false
+		}
+	}
+	return prefix, content, true
 }
 
 func firstQuotedContent(s string) string {

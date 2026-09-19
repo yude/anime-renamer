@@ -487,6 +487,47 @@ func TestProcessFileResolvesNumberlessSubtitle(t *testing.T) {
 	}
 }
 
+func TestProcessFileResolvesEmptyHashSpecialSubtitle(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/graphql" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[
+			{"node":{"annictId":1,"title":"政宗くんのリベンジ OAD","episodesCount":1,"episodes":{"edges":[
+				{"node":{"annictId":101,"number":1,"numberText":"OAD","sortNumber":1,"title":"うちのママにかぎって／綱手島、ふたたび。／12時を過ぎたシンデレラ"}}
+			]}}}
+		]}}}`)
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "政宗くんのリベンジ OAD# 「うちのママにかぎって／綱手島、ふたたび。／12時を過ぎたシンデレラ」.mp4")
+	if err := os.WriteFile(file, []byte("recording"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result := processFile(
+		file,
+		annict.NewClientWithURLs("token", server.URL, server.URL+"/graphql"),
+		cache.NewDisabled(filepath.Join(dir, "cache")),
+		make(map[string][]annict.Work),
+		make(map[int][]annict.Episode),
+		make(map[programsCacheKey][]annict.Program),
+		make(map[string]string),
+		true,
+		false,
+		matcher.AutoRenameThreshold,
+		"",
+	)
+	if result.Error != nil || result.SkipReason != "" || !result.Previewed {
+		t.Fatalf("processFile() = %+v, want OAD episode 1 preview", result)
+	}
+	if result.WorkTitle != "政宗くんのリベンジ OAD" || result.EpisodeNum != 1 {
+		t.Errorf("processFile() result = %+v, want OAD episode 1", result)
+	}
+}
+
 func TestProcessFileSafelySkipsUnresolvedNumberlessSubtitle(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

@@ -703,6 +703,29 @@ func TestParseFilename(t *testing.T) {
 			wantSub:   "プロジェクト〈アップル〉",
 		},
 		{
+			name:      "empty hash before numberless special subtitle",
+			input:     "政宗くんのリベンジ OAD# 「うちのママにかぎって／綱手島、ふたたび。／12時を過ぎたシンデレラ」.mp4",
+			wantTitle: "政宗くんのリベンジ OAD",
+			wantSub:   "うちのママにかぎって／綱手島、ふたたび。／12時を過ぎたシンデレラ",
+		},
+		{
+			name:      "empty hash before OVA subtitle",
+			input:     "作品 OVA#「特別話」.mp4",
+			wantTitle: "作品 OVA",
+			wantSub:   "特別話",
+		},
+		{
+			name:      "empty hash before Special Episode subtitle",
+			input:     "ありふれた職業で世界最強 プロローグ ／ Special Episode# 「ユエの日記帳／なれそめ温泉」.mp4",
+			wantTitle: "ありふれた職業で世界最強 プロローグ ／ Special Episode",
+			wantSub:   "ユエの日記帳／なれそめ温泉",
+		},
+		{
+			name:      "empty hash and empty subtitle remain unresolved",
+			input:     "作品 特番#「」.mp4",
+			wantTitle: "作品 特番#「」",
+		},
+		{
 			name:      "numberless final episode with subtitle",
 			input:     "あの日見た花の名前を僕達はまだ知らない。[終]最終話「あの夏に咲く花」 (2021_09_26).mp4",
 			wantTitle: "あの日見た花の名前を僕達はまだ知らない。",
