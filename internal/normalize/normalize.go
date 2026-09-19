@@ -148,9 +148,6 @@ func NormalizeTitleForMatch(s string) string {
 	if key == "saoselection特別版" {
 		return NormalizeTitleForMatch("ソードアート・オンライン")
 	}
-	if key == "カッコウの許嫁ヌマニメーション" {
-		return NormalizeTitleForMatch("カッコウの許嫁")
-	}
 	return key
 }
 

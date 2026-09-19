@@ -103,7 +103,7 @@ func TestNormalizeTitleForMatch(t *testing.T) {
 		{a: "八月のシンデレラナイン２０２１", b: "八月のシンデレラナイン", eq: true},
 		{a: "けいおん！番外編", b: "けいおん！", eq: true},
 		{a: "SAO SELECTION 特別版", b: "ソードアート・オンライン", eq: true},
-		{a: "カッコウの許嫁 【ヌマニメーション】", b: "カッコウの許嫁", eq: true},
+		{a: "カッコウの許嫁 【ヌマニメーション】", b: "カッコウの許嫁", eq: false},
 		{a: "けいおん！", b: "けいおん！！", eq: false},
 		{a: "SAO SELECTION 1", b: "ソードアート・オンライン", eq: false},
 		{a: "カッコウの許嫁 Season2", b: "カッコウの許嫁", eq: false},

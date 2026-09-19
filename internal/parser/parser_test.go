@@ -744,6 +744,25 @@ func TestParseFilename(t *testing.T) {
 			wantSub:   "4人のヒミツ",
 		},
 		{
+			name:      "numanimation slot after another work title",
+			input:     "僕の心のヤバイやつ 【ヌマニメーション】 ＃１「僕は奪われた」 (2023_04_02).mp4",
+			wantTitle: "僕の心のヤバイやつ",
+			wantEp:    1,
+			wantSub:   "僕は奪われた",
+		},
+		{
+			name:      "numanimation slot on numberless recording",
+			input:     "小市民シリーズ 【ヌマニメーション】[字] (2024_07_07).mp4",
+			wantTitle: "小市民シリーズ",
+			wantDate:  time.Date(2024, 7, 7, 0, 0, 0, 0, time.FixedZone("JST", 9*60*60)),
+		},
+		{
+			name:      "numanimation text inside title is preserved",
+			input:     "作品 【ヌマニメーション】 特別編 ＃１ (2024_07_07).mp4",
+			wantTitle: "作品 【ヌマニメーション】 特別編",
+			wantEp:    1,
+		},
+		{
 			name:      "generic anime EPG prefix",
 			input:     "アニメ　Ａｎｇｅｌ　Ｂｅａｔｓ！　第７話「Ａｌｉｖｅ」 (2019_11_19).mp4",
 			wantTitle: "Ａｎｇｅｌ Ｂｅａｔｓ！",

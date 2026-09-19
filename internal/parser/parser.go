@@ -97,7 +97,7 @@ var (
 	leadingAngleTagPattern         = regexp.MustCompile(`^[\s]*＜[^＞]*＞`)
 	seasonQualifierPattern         = regexp.MustCompile(`^(?:第[0-9０-９]+(?:期|クール)[\s\x{3000}]*)+`)
 	leadingSimpleTagPattern        = regexp.MustCompile(`^[\s]*(?:\[字\]|\[新\]|\[再\]|\[無\]|\[多\]|\[SS\]|\[解\]|\[終\]|\[デ\]|\[双\])`)
-	trailingMetadataPattern        = regexp.MustCompile(`(?:\s*(?:\[(?:字|新|再|無|多|SS|解|終|デ|双)\]|【(?:ANiMAZiNG!!!|ＡＮｉＭＡＺｉＮＧ！！！|字幕|アニメギルド)】))+\s*$`)
+	trailingMetadataPattern        = regexp.MustCompile(`(?:\s*(?:\[(?:字|新|再|無|多|SS|解|終|デ|双)\]|【(?:ANiMAZiNG!!!|ＡＮｉＭＡＺｉＮＧ！！！|ヌマニメーション|字幕|アニメギルド)】))+\s*$`)
 	finalEpisodeTagPattern         = regexp.MustCompile(`[\[［]終[\]］]`)
 	finalEpisodeSuffixPattern      = regexp.MustCompile(`[\s\x{3000}]*(?:最終話|最終回).*$`)
 	incompleteEpisodePrefixPattern = regexp.MustCompile(`(?:第[\s\x{3000}]*[0-9０-９]+|[#＃♯])[\s\x{3000}]*$`)
