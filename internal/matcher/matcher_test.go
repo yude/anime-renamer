@@ -543,6 +543,52 @@ func TestMatchUsesSortNumberForExactDescriptiveSpecial(t *testing.T) {
 	}
 }
 
+func TestMatchUsesCompleteOrdinalForExactDescriptiveSpecial(t *testing.T) {
+	episodes := make([]annict.Episode, 0, 25)
+	for number := 1; number <= 24; number++ {
+		episodes = append(episodes, annict.Episode{
+			ID:         100 + number,
+			Number:     float64Ptr(float64(number)),
+			SortNumber: number * 10,
+			Title:      fmt.Sprintf("第%d話", number),
+		})
+	}
+	episodes = append(episodes, annict.Episode{ID: 200, NumberText: "閑話", SortNumber: 250, Title: "ヴェルドラ日記"})
+	work := annict.Work{ID: 1, Title: "転生したらスライムだった件", EpisodesCount: 25}
+
+	result := Match(
+		&parser.RecordingMetadata{WorkTitle: work.Title, EpisodeNumber: 25, Subtitle: "ヴェルドラ日記"},
+		[]annict.Work{work},
+		map[int][]annict.Episode{1: episodes},
+		nil,
+	)
+	if result == nil || result.Episode == nil || result.Episode.ID != 200 || result.Confidence < AutoRenameThreshold {
+		t.Fatalf("Match() = %+v, want exact ordinal special at confidence >= %d", result, AutoRenameThreshold)
+	}
+	if got, ok := MatchResultEpisodeNumber(result); !ok || got != 25 {
+		t.Fatalf("MatchResultEpisodeNumber() = %d, %v; want 25, true", got, ok)
+	}
+
+	if got := findDescriptiveSpecialByOrdinal(25, "別の話", episodes, 25); got != nil {
+		t.Fatalf("wrong subtitle matched %+v", got)
+	}
+	if got := findDescriptiveSpecialByOrdinal(25, "ヴェルドラ日記", episodes, 26); got != nil {
+		t.Fatalf("incomplete episode list matched %+v", got)
+	}
+
+	duplicateSort := append([]annict.Episode(nil), episodes...)
+	duplicateSort[0].SortNumber = duplicateSort[1].SortNumber
+	if got := findDescriptiveSpecialByOrdinal(25, "ヴェルドラ日記", duplicateSort, 25); got != nil {
+		t.Fatalf("duplicate sort order matched %+v", got)
+	}
+
+	missingSort := append([]annict.Episode(nil), episodes...)
+	missingSort[0].SortNumber = 0
+	if got := findDescriptiveSpecialByOrdinal(25, "ヴェルドラ日記", missingSort, 25); got != nil {
+		t.Fatalf("missing sort order matched %+v", got)
+	}
+}
+
 func TestMatchUsesExplicitLifeZeroOnlyWithExactSubtitle(t *testing.T) {
 	zero, one := 0.0, 1.0
 	episodes := map[int][]annict.Episode{1: {

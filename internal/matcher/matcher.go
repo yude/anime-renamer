@@ -239,14 +239,18 @@ func match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 	episodes := episodesByWork[work.ID]
 	if meta.EpisodeNumber > 0 && len(episodes) > 0 {
 		episode := findMatchingEpisode(episodeNumberForMatch, meta.Subtitle, episodes)
+		if episode == nil {
+			episode = findDescriptiveSpecialByOrdinal(episodeNumberForMatch, meta.Subtitle, episodes, work.EpisodesCount)
+		}
 		if episode != nil {
+			ordinalSpecial := descriptiveSpecialOrdinalMatches(episode, episodes, work.EpisodesCount, meta.EpisodeNumber, meta.Subtitle)
 			result.Episode = episode
 			if explicitZeroEpisodeMatches(episode, meta.Subtitle) {
 				result.OutputEpisodeNumber = 0
 				result.OutputNumberSet = true
 			} else if displayed, ok := episodeLabelNumber(episode); ok && displayed == meta.EpisodeNumber {
 				result.OutputEpisodeNumber = displayed
-			} else if specialSortNumberMatches(episode, meta.EpisodeNumber, meta.Subtitle) {
+			} else if specialSortNumberMatches(episode, meta.EpisodeNumber, meta.Subtitle) || ordinalSpecial {
 				result.OutputEpisodeNumber = meta.EpisodeNumber
 			}
 			result.Confidence += 40
@@ -254,7 +258,9 @@ func match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork m
 
 			result.Confidence += 30
 			matchedNumber, _ := MatchResultEpisodeNumber(result)
-			if matchedNumber == episodeNumberForMatch {
+			if ordinalSpecial {
+				result.Reasons = append(result.Reasons, fmt.Sprintf("descriptive special matched complete Annict ordinal %d", episodeNumberForMatch))
+			} else if matchedNumber == episodeNumberForMatch {
 				result.Reasons = append(result.Reasons, fmt.Sprintf("episode number %d matched", episodeNumberForMatch))
 			} else if meta.Subtitle != "" && episode.Title != "" && subtitlesEquivalent(episode.Title, meta.Subtitle) {
 				result.Reasons = append(result.Reasons, fmt.Sprintf("unique subtitle mapped file episode %d to Annict episode %d", episodeNumberForMatch, matchedNumber))
@@ -948,6 +954,62 @@ func specialSortNumberMatches(episode *annict.Episode, number int, subtitle stri
 		return false
 	}
 	return subtitlesEquivalent(episode.Title, subtitle)
+}
+
+// findDescriptiveSpecialByOrdinal accepts an episode with a descriptive
+// NumberText (for example 閑話) only when the complete Annict list proves that
+// it occupies the requested one-based sort position and its subtitle matches
+// exactly. SortNumber itself is an internal ordering key and is never treated
+// as a public episode number here.
+func findDescriptiveSpecialByOrdinal(number int, subtitle string, episodes []annict.Episode, episodesCount int) *annict.Episode {
+	var match *annict.Episode
+	for i := range episodes {
+		if !descriptiveSpecialOrdinalMatches(&episodes[i], episodes, episodesCount, number, subtitle) {
+			continue
+		}
+		if match != nil {
+			return nil
+		}
+		match = &episodes[i]
+	}
+	return match
+}
+
+func descriptiveSpecialOrdinalMatches(episode *annict.Episode, episodes []annict.Episode, episodesCount, number int, subtitle string) bool {
+	if episode == nil || episode.Number != nil || number <= 0 || subtitle == "" || episode.Title == "" {
+		return false
+	}
+	numberText := strings.TrimSpace(episode.NumberText)
+	if numberText == "" {
+		return false
+	}
+	if _, supported := episodeNumberFromText(numberText); supported {
+		return false
+	}
+	if !subtitlesEquivalent(episode.Title, subtitle) || episodesCount <= 0 || len(episodes) != episodesCount || number > len(episodes) {
+		return false
+	}
+
+	seenSortNumbers := make(map[int]struct{}, len(episodes))
+	rank := 1
+	targetOccurrences := 0
+	for i := range episodes {
+		sortNumber := episodes[i].SortNumber
+		if sortNumber <= 0 {
+			return false
+		}
+		if _, duplicate := seenSortNumbers[sortNumber]; duplicate {
+			return false
+		}
+		seenSortNumbers[sortNumber] = struct{}{}
+		if episodes[i].ID == episode.ID {
+			targetOccurrences++
+		}
+		if sortNumber < episode.SortNumber {
+			rank++
+		}
+	}
+	return targetOccurrences == 1 && rank == number
 }
 
 // findMatchingProgram finds a program matching the recording date and episode.
