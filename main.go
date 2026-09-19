@@ -261,6 +261,11 @@ func processFile(
 	fmt.Fprintf(os.Stderr, "  Parsed:    Work=%q Episode=%d Subtitle=%q Date=%s\n",
 		meta.WorkTitle, meta.EpisodeNumber, meta.Subtitle,
 		meta.RecordedDate.Format("2006-01-02"))
+	if mapped, ok := mapVerifiedSelectionEpisode(meta); ok {
+		meta = mapped
+		fmt.Fprintf(os.Stderr, "  Fallback:  verified selection schedule maps to Work=%q Episode=%d Subtitle=%q\n",
+			meta.WorkTitle, meta.EpisodeNumber, meta.Subtitle)
+	}
 	numberlessRecovery := meta.EpisodeNumber <= 0
 	dateOnlyRecovery := isDateOnlyRecoveryCandidate(meta)
 	dateBackedRecovery := isDateBackedRecoveryCandidate(meta)
