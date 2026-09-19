@@ -448,6 +448,7 @@ func TestEpisodeNumberUsesNumberTextBeforeInternalSortOrder(t *testing.T) {
 		{text: "SAILING 26", want: 26},
 		{text: "RIDE.8", want: 8},
 		{text: "第十四話", want: 14},
+		{text: "第拾壹話", want: 11},
 	} {
 		episode := &annict.Episode{NumberText: tt.text, SortNumber: tt.want * 10}
 		if got, ok := EpisodeNumber(episode); !ok || got != tt.want {
@@ -516,6 +517,19 @@ func TestEpisodeNumberRejectsUnsupportedNumberTextWithoutSortFallback(t *testing
 	episode := &annict.Episode{NumberText: "総集篇", SortNumber: 2150}
 	if got, ok := EpisodeNumber(episode); ok || got != 0 {
 		t.Errorf("EpisodeNumber() = %d, %v; want 0, false", got, ok)
+	}
+}
+
+func TestMatchingRelatedWorksRestoresYearLabelledRemake(t *testing.T) {
+	works := []annict.Work{
+		{ID: 1, Title: "HUNTER×HUNTER"},
+		{ID: 2, Title: "HUNTER×HUNTER(2011)"},
+		{ID: 3, Title: "劇場版 HUNTER×HUNTER"},
+		{ID: 4, Title: "HUNTER×HUNTER'"},
+	}
+	got := MatchingRelatedWorks("HUNTER×HUNTER", works)
+	if len(got) != 2 || got[0].ID != 1 || got[1].ID != 2 {
+		t.Fatalf("MatchingRelatedWorks() = %+v, want base and year-labelled remake only", got)
 	}
 }
 

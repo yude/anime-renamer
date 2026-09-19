@@ -33,6 +33,8 @@ func TestMapVerifiedSelectionEpisode(t *testing.T) {
 		{"ゆるゆり せれくしょん", 2, "2022-08-23", "ゆるゆり さん☆ハイ！", 2, "さぁおびえるがいい"},
 		{"ゆるゆり せれくしょん", 9, "2022-09-20", "ゆるゆり♪♪", 11, "時をかけるあかり"},
 		{"ゆるゆり せれくしょん", 12, "2022-09-27", "ゆるゆり", 5, "あかりとかミンミンゼミとかなく頃に"},
+		{"真・侍伝 YAIBA", 0, "2026-09-10", "真･侍伝 YAIBA", 1, "YAIBA見参"},
+		{"真・侍伝 YAIBA", 0, "2026-09-17", "真･侍伝 YAIBA", 2, "蘇る風神剣"},
 	} {
 		meta := &parser.RecordingMetadata{WorkTitle: tt.title, EpisodeNumber: tt.selection, RecordedDate: date(tt.date)}
 		mapped, ok := mapVerifiedSelectionEpisode(meta)
@@ -58,6 +60,9 @@ func TestMapVerifiedSelectionEpisodeRequiresExactIdentity(t *testing.T) {
 		{WorkTitle: "SAO SELECTION", EpisodeNumber: 2, RecordedDate: date},
 		{WorkTitle: "SAO SELECTION 特別版", EpisodeNumber: 1, RecordedDate: date},
 		{WorkTitle: "別のセレクション", EpisodeNumber: 1, RecordedDate: date},
+		{WorkTitle: "真・侍伝 YAIBA", RecordedDate: date},
+		{WorkTitle: "真・侍伝 YAIBA 特別版", RecordedDate: date.AddDate(4, 2, 0)},
+		{WorkTitle: "真・侍伝 YAIBA", RecordedDate: date.AddDate(4, 2, 1)},
 	} {
 		if mapped, ok := mapVerifiedSelectionEpisode(meta); ok || mapped != meta {
 			t.Errorf("mapVerifiedSelectionEpisode(%+v) = %+v, %v; want unchanged rejection", meta, mapped, ok)

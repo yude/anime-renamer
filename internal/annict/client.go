@@ -378,6 +378,8 @@ var titleSearchAliases = map[string][]string{
 	normalize.NormalizeTitleForMatch("八月のシンデレラナイン２０２１"):                              {"八月のシンデレラナイン"},
 	normalize.NormalizeTitleForMatch("けいおん！番外編"):                                     {"けいおん！"},
 	normalize.NormalizeTitleForMatch("SAO SELECTION 特別版"):                            {"ソードアート・オンライン"},
+	normalize.NormalizeTitleForMatch("領民0人スタートの辺境領主様"):                               {"領民０人スタートの辺境領主様"},
+	normalize.NormalizeTitleForMatch("ヘルモード ~やり込み好きのゲーマーは廃設定の異世界で無双する~2"):            {"ヘルモード ～やり込み好きのゲーマーは廃設定の異世界で無双する～ 2nd Season"},
 }
 
 func punctuationAsSpaces(s string) string {

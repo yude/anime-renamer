@@ -72,13 +72,13 @@ var (
 	// required to avoid treating 第2クール as episode 2.
 	arabicEpisodePattern = regexp.MustCompile(`第[\s\x{3000}]*([0-9０-９]+)[\s\x{3000}]*([話幕番怪夜回局羽RＲ])`)
 	// 第三話, 第五幕, 第一夜, 第六局 (kanji digits)
-	kanjiEpisodePattern         = regexp.MustCompile(`第[\s\x{3000}]*([〇一二三四五六七八九十百千壱弐参肆伍陸漆捌玖拾]+)[\s\x{3000}]*([話幕番怪夜回局羽RＲ])`)
+	kanjiEpisodePattern         = regexp.MustCompile(`第[\s\x{3000}]*([〇一二三四五六七八九十百千壱壹弐貳参參肆伍陸漆捌玖拾]+)[\s\x{3000}]*([話幕番怪夜回局羽RＲ])`)
 	bareEpisodePattern          = regexp.MustCompile(`([0-9０-９]+)[\s\x{3000}]*話`)
-	bareKanjiEpisodePattern     = regexp.MustCompile(`[「『]?([〇一二三四五六七八九十百千壱弐参肆伍陸漆捌玖拾]+)話`)
+	bareKanjiEpisodePattern     = regexp.MustCompile(`[「『]?([〇一二三四五六七八九十百千壱壹弐貳参參肆伍陸漆捌玖拾]+)話`)
 	stepEpisodePattern          = regexp.MustCompile(`[【\[]?(?:すてっぷ|ステップ)[\s\x{3000}]*([①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳])[】\]]?`)
 	parenthesizedEpisodePattern = regexp.MustCompile(`[（(][\s\x{3000}]*([0-9０-９]{1,3})[\s\x{3000}]*[）)]`)
 	counterEpisodePattern       = regexp.MustCompile(`([0-9０-９]+)[\s\x{3000}]*(?:時限目|軒目|日記)`)
-	kanjiVolumeEpisodePattern   = regexp.MustCompile(`([〇一二三四五六七八九十百千壱弐参肆伍陸漆捌玖拾]+)[\s\x{3000}]*の巻`)
+	kanjiVolumeEpisodePattern   = regexp.MustCompile(`([〇一二三四五六七八九十百千壱壹弐貳参參肆伍陸漆捌玖拾]+)[\s\x{3000}]*の巻`)
 	karteEpisodePattern         = regexp.MustCompile(`(?i)karte[.．\s\x{3000}]*([0-9０-９]+)`)
 	missionEpisodePattern       = regexp.MustCompile(`[【\[]?[mMｍＭ][iIｉＩ][sSｓＳ][sSｓＳ][iIｉＩ][oOｏＯ][nNｎＮ][：:.．\s\x{3000}]*([0-9０-９]+)[】\]]?`)
 	levelEpisodePattern         = regexp.MustCompile(`(?i)lv[.．][\s\x{3000}]*([0-9０-９]+)`)
@@ -96,12 +96,15 @@ var (
 	leadingBracketTagPattern       = regexp.MustCompile(`^[\s]*【[^】]*】`)
 	leadingAngleTagPattern         = regexp.MustCompile(`^[\s]*＜[^＞]*＞`)
 	seasonQualifierPattern         = regexp.MustCompile(`^(?:第[0-9０-９]+(?:期|クール)[\s\x{3000}]*)+`)
-	leadingSimpleTagPattern        = regexp.MustCompile(`^[\s]*(?:\[字\]|\[新\]|\[再\]|\[無\]|\[多\]|\[SS\]|\[解\]|\[終\]|\[デ\]|\[双\])`)
-	trailingMetadataPattern        = regexp.MustCompile(`(?:\s*(?:\[(?:字|新|再|無|多|SS|解|終|デ|双)\]|【(?:ANiMAZiNG!!!|ＡＮｉＭＡＺｉＮＧ！！！|ヌマニメーション|字幕|アニメギルド)】))+\s*$`)
+	leadingSimpleTagPattern        = regexp.MustCompile(`^[\s]*(?:\[字\]|\[新\]|\[再\]|\[無\]|\[多\]|\[SS\]|\[解\]|\[終\]|\[デ\]|\[双\]|\[二\])`)
+	trailingMetadataPattern        = regexp.MustCompile(`(?:\s*(?:\[(?:字|新|再|無|多|SS|解|終|デ|双|二)\]|【(?:ANiMAZiNG!!!|ＡＮｉＭＡＺｉＮＧ！！！|ヌマニメーション|字幕|アニメギルド)】))+\s*$`)
 	finalEpisodeTagPattern         = regexp.MustCompile(`[\[［]終[\]］]`)
 	finalEpisodeSuffixPattern      = regexp.MustCompile(`[\s\x{3000}]*(?:最終話|最終回).*$`)
 	incompleteEpisodePrefixPattern = regexp.MustCompile(`(?:第[\s\x{3000}]*[0-9０-９]+|[#＃♯])[\s\x{3000}]*$`)
 	explicitSpecialSuffixPattern   = regexp.MustCompile(`(?i)(?:\b(?:OVA|OAD|Special(?:\s+Episode)?)|特別編)[\s\x{3000}]*$`)
+	genericAnimeEPGPrefixPattern   = regexp.MustCompile(`^(?:[\s\x{3000}]*\[(?:字|新|再|無|多|SS|解|終|デ|双|二)\])*[\s\x{3000}]*(?:TV|テレビ)?アニメ[\s\x{3000}]+`)
+	bareEPGNumberSubtitlePattern   = regexp.MustCompile(`^(.+\S)[\s\x{3000}]+([0-9０-９]{2})[\s\x{3000}]+(\S.*)$`)
+	seasonBareEPGNumberPattern     = regexp.MustCompile(`^(.+[~〜～][0-9０-９]+)[\s\x{3000}]+([0-9０-９]{2})$`)
 
 	// Metadata tag patterns to strip from filenames (SCRename rp1 equivalent).
 	metadataTagPatterns = []*regexp.Regexp{
@@ -135,6 +138,7 @@ var kanjiDigits = map[rune]int{
 	'一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
 	'六': 6, '七': 7, '八': 8, '九': 9,
 	'壱': 1, '弐': 2, '参': 3, '肆': 4, '伍': 5,
+	'壹': 1, '貳': 2, '參': 3,
 	'陸': 6, '漆': 7, '捌': 8, '玖': 9,
 }
 
@@ -327,6 +331,7 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 		return nil, fmt.Errorf("empty filename: %q", filename)
 	}
 	finalEpisode := hasFinalEpisodeMarker(name)
+	genericAnimeEPG := genericAnimeEPGPrefixPattern.MatchString(name)
 
 	// 2. Extract date from end
 	var recordedDate time.Time
@@ -367,6 +372,30 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 	epStart := -1
 	epEnd := -1
 	episodeMarkerOpensSubtitle := false
+	positionalSubtitle := ""
+	if genericAnimeEPG {
+		if m := bareEPGNumberSubtitlePattern.FindStringSubmatchIndex(name); m != nil && !startsWithEpisodeMetadata(name[m[6]:m[7]]) {
+			parsedNumber, err := decimalEpisodeNumber(name[m[4]:m[5]])
+			if err != nil {
+				return nil, fmt.Errorf("invalid episode number %q: %w", name[m[4]:m[5]], err)
+			}
+			episodeNumber = parsedNumber
+			epStart = m[4]
+			epEnd = m[5]
+			positionalSubtitle = strings.TrimSpace(name[m[6]:m[7]])
+		}
+		if episodeNumber == 0 {
+			if m := seasonBareEPGNumberPattern.FindStringSubmatchIndex(name); m != nil {
+				parsedNumber, err := decimalEpisodeNumber(name[m[4]:m[5]])
+				if err != nil {
+					return nil, fmt.Errorf("invalid episode number %q: %w", name[m[4]:m[5]], err)
+				}
+				episodeNumber = parsedNumber
+				epStart = m[4]
+				epEnd = m[5]
+			}
+		}
+	}
 
 	// Try decimal patterns in priority order. Longer words precede the short
 	// "ep" form to keep their boundaries explicit.
@@ -389,14 +418,16 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 		homeEpisodePattern,
 		quotedProgramEpisodePattern,
 	}
-	if m := earliestEpisodeMatch(name, decimalPatterns...); m != nil {
-		parsedNumber, err := decimalEpisodeNumber(name[m[2]:m[3]])
-		if err != nil {
-			return nil, fmt.Errorf("invalid episode number %q: %w", name[m[2]:m[3]], err)
+	if episodeNumber == 0 {
+		if m := earliestEpisodeMatch(name, decimalPatterns...); m != nil {
+			parsedNumber, err := decimalEpisodeNumber(name[m[2]:m[3]])
+			if err != nil {
+				return nil, fmt.Errorf("invalid episode number %q: %w", name[m[2]:m[3]], err)
+			}
+			episodeNumber = parsedNumber
+			epStart = m[0]
+			epEnd = m[1]
 		}
-		episodeNumber = parsedNumber
-		epStart = m[0]
-		epEnd = m[1]
 	}
 	if episodeNumber == 0 {
 		if m := earliestEpisodeMatch(name, kanjiEpisodePattern); m != nil {
@@ -458,10 +489,12 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 	}
 
 	// 5. Extract subtitle from 「...」 AFTER episode marker (not before)
-	subtitle := ""
+	subtitle := positionalSubtitle
 	if epEnd >= 0 {
 		afterEp := name[epEnd:]
-		if episodeMarkerOpensSubtitle {
+		if positionalSubtitle != "" {
+			// Already extracted from the strict generic-anime EPG layout.
+		} else if episodeMarkerOpensSubtitle {
 			// Some EPGs place the episode number inside the same quotes as the
 			// subtitle: 「一話 カエルの歌を吹いた」.
 			runes := []rune(strings.TrimSpace(afterEp))
@@ -473,6 +506,13 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 			}
 		} else {
 			subtitle = firstQuotedContent(afterEp)
+			if subtitle == "" && genericAnimeEPG && finalEpisode {
+				// Some generic-anime EPG rows expose the finale subtitle as
+				// unquoted text after an otherwise explicit 第N話 marker. Limit
+				// this fallback to [終] rows so ordinary trailing annotations do
+				// not silently become episode identity.
+				subtitle = stripTrailingMetadataTags(strings.TrimSpace(afterEp))
+			}
 		}
 	} else if title, trailingSubtitle, ok := trailingQuotedContent(name); ok {
 		// EPGs commonly omit the numeric episode label while retaining a

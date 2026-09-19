@@ -474,7 +474,7 @@ func processFile(
 	// newer, explicitly labelled continuation or remake. If the selected
 	// episode contradicts the file subtitle, give those related works a chance
 	// to provide a stronger match instead of stopping at the first number.
-	shouldRetryRelated := !dateOnlyRecovery && (result.Episode == nil || (meta.Subtitle != "" && result.Confidence < matcher.AutoRenameThreshold))
+	shouldRetryRelated := !dateOnlyRecovery && ((meta.EpisodeNumber > 0 && result.Episode == nil) || (meta.Subtitle != "" && result.Confidence < matcher.AutoRenameThreshold))
 	if shouldRetryRelated {
 		relatedWorks, relatedErr := searchRelatedWorks(client, c, meta.WorkTitle, workCache, episodesCache)
 		if relatedErr != nil {
@@ -605,7 +605,7 @@ func isDateBackedRecoveryCandidate(meta *parser.RecordingMetadata) bool {
 		return false
 	}
 	title := normalize.Normalize(meta.WorkTitle)
-	for _, marker := range []string{"総集編", "特別編", "特番", "スペシャル", "一挙放送", "セレクション", "劇場版", "映画"} {
+	for _, marker := range []string{"総集編", "特別編", "特番", "スペシャル", "一挙放送", "セレクション", "劇場版", "映画", "金曜ロードショー"} {
 		if strings.Contains(title, marker) {
 			return false
 		}

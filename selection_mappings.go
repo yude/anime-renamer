@@ -19,12 +19,20 @@ type selectionEpisodeTarget struct {
 	subtitle      string
 }
 
-// verifiedSelectionEpisodes records historical selection broadcasts whose
-// selection ordinal is unrelated to the underlying story episode number.
-// Each row was verified against Shoboi Calendar's TID, Count, STSubTitle, and
-// start date. Annict still has to independently match the target work, number,
-// and subtitle before a rename can reach the confidence threshold.
+// verifiedSelectionEpisodes records broadcasts whose filename identity needs
+// an exact schedule-backed correction before ordinary Annict matching. Most
+// rows map a selection ordinal to a story episode; numberless rows use ordinal
+// zero. Each row was verified against Shoboi Calendar's TID, Count,
+// STSubTitle, and start date. Annict still has to independently match the
+// target work, number, and subtitle before a rename can reach the confidence
+// threshold.
 var verifiedSelectionEpisodes = map[selectionEpisodeKey]selectionEpisodeTarget{
+	// BS rerun of 真･侍伝 YAIBA: Shoboi TID 7430, channel 71. The first row is
+	// warned for its broadcast time, so keep both dates exact rather than
+	// relaxing warning-only date inference globally.
+	selectionKey("真・侍伝 YAIBA", 0, "2026-09-10"): {"真･侍伝 YAIBA", 1, "YAIBA見参"},
+	selectionKey("真・侍伝 YAIBA", 0, "2026-09-17"): {"真･侍伝 YAIBA", 2, "蘇る風神剣"},
+
 	// SAO SELECTION: Shoboi TIDs 2588, 3416, 5049, and 5603.
 	selectionKey("SAO SELECTION", 1, "2022-07-10"):  {"ソードアート・オンラインII", 12, "幻の銃弾"},
 	selectionKey("SAO SELECTION", 2, "2022-07-17"):  {"ソードアート・オンライン アリシゼーション War of Underworld ‐THE LAST SEASON‐", 18, "記憶"},
@@ -78,7 +86,7 @@ func selectionKey(title string, number int, date string) selectionEpisodeKey {
 }
 
 func mapVerifiedSelectionEpisode(meta *parser.RecordingMetadata) (*parser.RecordingMetadata, bool) {
-	if meta == nil || meta.EpisodeNumber <= 0 || meta.RecordedDate.IsZero() {
+	if meta == nil || meta.EpisodeNumber < 0 || meta.RecordedDate.IsZero() {
 		return meta, false
 	}
 	key := selectionKey(meta.WorkTitle, meta.EpisodeNumber, meta.RecordedDate.Format("2006-01-02"))

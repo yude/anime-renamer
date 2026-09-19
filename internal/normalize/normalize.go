@@ -148,6 +148,9 @@ func NormalizeTitleForMatch(s string) string {
 	if key == "saoselection特別版" {
 		return NormalizeTitleForMatch("ソードアート・オンライン")
 	}
+	if key == "ヘルモードやり込み好きのゲーマーは廃設定の異世界で無双する2" {
+		return NormalizeTitleForMatch("ヘルモード ～やり込み好きのゲーマーは廃設定の異世界で無双する～ 2nd Season")
+	}
 	return key
 }
 

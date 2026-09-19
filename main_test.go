@@ -667,6 +667,49 @@ func TestProcessFileRetriesExplicitRelatedSeasonAfterMissingEpisode(t *testing.T
 	}
 }
 
+func TestProcessFileRetriesYearLabelledRemakeAfterMissingEpisode(t *testing.T) {
+	graphqlRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/graphql" {
+			http.NotFound(w, r)
+			return
+		}
+		graphqlRequests++
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[
+			{"node":{"annictId":1,"title":"HUNTER×HUNTER","seasonName":"AUTUMN","seasonYear":1999,"episodesCount":1,"episodes":{"edges":[{"node":{"annictId":101,"number":1,"sortNumber":1,"title":"旅立ち×と×仲間たち"}}]}}},
+			{"node":{"annictId":2,"title":"HUNTER×HUNTER(2011)","seasonName":"AUTUMN","seasonYear":2011,"episodesCount":1,"episodes":{"edges":[{"node":{"annictId":201,"number":148,"sortNumber":148,"title":"コレマデ×ト×コレカラ"}}]}}}
+		]}}}`)
+	}))
+	defer server.Close()
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "アニメ HUNTER×HUNTER[終] 第148話 コレマデ×ト×コレカラ (20260903).mp4")
+	if err := os.WriteFile(file, []byte("recording"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	client := annict.NewClientWithURLs("token", server.URL, server.URL+"/graphql")
+	result := processFile(
+		file,
+		client,
+		cache.NewDisabled(filepath.Join(dir, "cache")),
+		make(map[string][]annict.Work),
+		make(map[int][]annict.Episode),
+		make(map[programsCacheKey][]annict.Program),
+		make(map[string]string),
+		true,
+		false,
+		matcher.AutoRenameThreshold,
+		"",
+	)
+	if result.Error != nil || result.WorkTitle != "HUNTER×HUNTER(2011)" || result.EpisodeNum != 148 || result.Subtitle != "コレマデ×ト×コレカラ" || !result.Previewed {
+		t.Fatalf("processFile() = %+v, want 2011 remake episode 148 preview", result)
+	}
+	if graphqlRequests != 2 {
+		t.Errorf("GraphQL requests = %d, want initial search plus one remake retry", graphqlRequests)
+	}
+}
+
 func TestProcessFileRetriesRelatedWorkAfterSubtitleMismatch(t *testing.T) {
 	graphqlRequests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -712,6 +755,7 @@ func TestProcessFileRetriesRelatedWorkAfterSubtitleMismatch(t *testing.T) {
 
 func TestProcessFileNoEpisodeDoesNotContactAnnict(t *testing.T) {
 	testProcessFileSkippedWithoutAnnict(t, "作品 総集編 (20260801).mp4", "no supported single episode number")
+	testProcessFileSkippedWithoutAnnict(t, "金曜ロードショー「タイタニック・前編」★番組オリジナル吹き替え版★[二][字][デ] (20260904).mp4", "no supported single episode number")
 }
 
 func TestProcessFileResolvesDateOnlyFromUniqueSyobocalSchedule(t *testing.T) {

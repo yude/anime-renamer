@@ -38,7 +38,7 @@ var specialWorkContinuationPattern = regexp.MustCompile(`^(?:ova|oad|特別編|s
 var parentheticalWorkYearPattern = regexp.MustCompile(`[（(]([0-9]{4})(?:年版)?[）)]`)
 
 var episodeNumberTextPattern = regexp.MustCompile(`(?i)^(?:第\s*([0-9]+)\s*(?:話|幕|番|怪|夜|回|局|羽|R)|#\s*([0-9]+)|episode[.\s]*([0-9]+)|sailing\s*([0-9]+)|ride[.\s]*([0-9]+)|([0-9]+))$`)
-var kanjiEpisodeNumberTextPattern = regexp.MustCompile(`^第\s*([〇一二三四五六七八九十百千壱弐参肆伍陸漆捌玖拾]+)\s*(?:話|幕|番|怪|夜|回|局|羽|R)$`)
+var kanjiEpisodeNumberTextPattern = regexp.MustCompile(`^第\s*([〇一二三四五六七八九十百千壱壹弐貳参參肆伍陸漆捌玖拾]+)\s*(?:話|幕|番|怪|夜|回|局|羽|R)$`)
 var subtitleSegmentOrdinalPrefix = regexp.MustCompile(`(?i)^(?:episode[0-9]+|其の[0-9一二三四五六七八九十]+|[a-z]:)`)
 var subtitleEpisodeLabelPrefix = regexp.MustCompile(`(?i)^(?:life[.\s]*(?:[0-9]+|max(?:imum)?)(?:\s*vs\s*power[.\s]*max(?:imum)?)?|コミュ[0-9]+)`)
 var zeroEpisodeLabelPattern = regexp.MustCompile(`(?i)^life[.\s]*0+(?:\s|$)`)
@@ -530,7 +530,12 @@ func MatchingRelatedWorks(title string, works []annict.Work) []annict.Work {
 			continue
 		}
 		workTitle := normalize.NormalizeTitleForMatch(work.Title)
-		if strings.HasPrefix(workTitle, baseTitle) && seriesContinuationPattern.MatchString(strings.TrimPrefix(workTitle, baseTitle)) {
+		// MatchingWorks deliberately prefers a presentation-exact title. On a
+		// retry, also restore explicitly year-labelled remakes such as
+		// HUNTER×HUNTER(2011), whose normalized base is identical but whose
+		// episode range can prove that it is the intended production.
+		yearLabelledRemake := workTitle == baseTitle && parentheticalWorkYearPattern.MatchString(work.Title)
+		if yearLabelledRemake || (strings.HasPrefix(workTitle, baseTitle) && seriesContinuationPattern.MatchString(strings.TrimPrefix(workTitle, baseTitle))) {
 			matches = append(matches, work)
 		}
 	}

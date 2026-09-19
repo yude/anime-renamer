@@ -75,6 +75,8 @@ func TestSearchTitleVariants(t *testing.T) {
 		{input: "八月のシンデレラナイン２０２１", want: "八月のシンデレラナイン"},
 		{input: "けいおん！番外編", want: "けいおん！"},
 		{input: "SAO SELECTION 特別版", want: "ソードアート・オンライン"},
+		{input: "領民0人スタートの辺境領主様", want: "領民０人スタートの辺境領主様"},
+		{input: "ヘルモード ~やり込み好きのゲーマーは廃設定の異世界で無双する~2", want: "ヘルモード ～やり込み好きのゲーマーは廃設定の異世界で無双する～ 2nd Season"},
 	} {
 		if got := searchTitleVariants(tt.input); !slices.Contains(got, tt.want) {
 			t.Errorf("searchTitleVariants(%q) = %q, want variant %q", tt.input, got, tt.want)
