@@ -947,6 +947,23 @@ func TestDateProvenSubtitleMatchAcceptsExplicitOtherSummary(t *testing.T) {
 	}
 }
 
+func TestDateProvenSubtitleMatchAcceptsCompleteReorderedPartsOnly(t *testing.T) {
+	annictTitle := "台風です。／ネコカフェです。／妄想です。／愛してるゲームです。"
+	scheduleTitle := "台風です。／妄想です。／ネコカフェです。／愛してるゲームです。"
+	if !DateProvenSubtitleMatch(annictTitle, scheduleTitle) {
+		t.Fatal("date-proven complete subtitle parts should tolerate provider ordering differences")
+	}
+	if subtitlesEquivalent(annictTitle, scheduleTitle) {
+		t.Fatal("ordinary subtitle identity must remain order-sensitive")
+	}
+	if DateProvenSubtitleMatch(annictTitle, "台風です。／妄想です。／文化祭です。／愛してるゲームです。") {
+		t.Fatal("a different subtitle part must not pass the date-proven set comparison")
+	}
+	if DateProvenSubtitleMatch("同じです。／同じです。", "同じです。／別です。") {
+		t.Fatal("duplicate part counts must be preserved")
+	}
+}
+
 func TestMatchSubtitlePresentationVariantsReachThreshold(t *testing.T) {
 	works := []annict.Work{{ID: 1, Title: "作品"}}
 	for i, tt := range []struct {

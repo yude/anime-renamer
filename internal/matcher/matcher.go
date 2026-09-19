@@ -1087,7 +1087,36 @@ func subtitlesEquivalent(a, b string) bool {
 func DateProvenSubtitleMatch(complete, observed string) bool {
 	return subtitlesEquivalent(complete, observed) ||
 		CompositeSubtitlePartMatch(complete, observed) ||
+		sameSubtitlePartMultiset(complete, observed) ||
 		subtitleOtherSummaryMatch(observed, complete)
+}
+
+// sameSubtitlePartMultiset tolerates provider-only ordering differences in a
+// complete multi-part subtitle. It is intentionally reachable only through
+// DateProvenSubtitleMatch, where schedule date and episode identity provide
+// independent proof; ordinary episode selection remains order-sensitive.
+func sameSubtitlePartMultiset(a, b string) bool {
+	aParts := slashSubtitleParts(a)
+	bParts := slashSubtitleParts(b)
+	if len(aParts) < 2 || len(aParts) != len(bParts) {
+		return false
+	}
+	counts := make(map[string]int, len(aParts))
+	for _, part := range aParts {
+		counts[part]++
+	}
+	for _, part := range bParts {
+		if counts[part] == 0 {
+			return false
+		}
+		counts[part]--
+	}
+	for _, count := range counts {
+		if count != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // CompositeSubtitlePartMatch reports whether observed is a contiguous set of
