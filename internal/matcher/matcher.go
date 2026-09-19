@@ -1162,6 +1162,12 @@ func slashSubtitleParts(s string) []string {
 func subtitleIdentityKey(s string) string {
 	key := normalize.NormalizeSubtitleForMatch(s)
 	key = subtitleEpisodeLabelPrefix.ReplaceAllString(key, "")
+	// Annict and Syobocal differ by one particle for this exact episode title.
+	// Keep the exception exact instead of enabling generic edit-distance
+	// matching for date-backed subtitles.
+	if key == "なにが起きてもおかしくないのでは!!?" {
+		key = "なにが起きてもおかしくはないのでは!!?"
+	}
 	// A middle dot immediately before a terminal 前編/後編 label is only a
 	// separator in some providers (others use parentheses). Keep all other
 	// middle dots, and keep the qualifier itself, so 前編 and 後編 remain

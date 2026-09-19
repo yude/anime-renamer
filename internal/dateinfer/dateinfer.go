@@ -4,6 +4,7 @@ package dateinfer
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/yude/anime-renamer/internal/annict"
@@ -64,6 +65,78 @@ func ResolveUnique(date time.Time, episodes []annict.Episode, programs []syoboca
 // complete slash-delimited parts of a composite title.
 func ResolveUniqueWithSubtitle(date time.Time, episodes []annict.Episode, programs []syobocal.Program, subtitle string) (*annict.Episode, string) {
 	return resolve(date, episodes, programs, 0, subtitle)
+}
+
+// ResolveCorroboratedWarnedWithSubtitle recovers a warning-only schedule only
+// when multiple channels independently agree on the date and episode number,
+// every row supplies the same Annict-compatible subtitle, and the optional
+// filename subtitle agrees too. Warned rows are never mixed with clean rows:
+// callers must prefer the ordinary strict resolver whenever clean data exists.
+func ResolveCorroboratedWarnedWithSubtitle(date time.Time, episodes []annict.Episode, programs []syobocal.Program, fileSubtitle string) (*annict.Episode, string) {
+	if date.IsZero() {
+		return nil, "recording date is missing"
+	}
+
+	dateKey := date.In(jst).Format("2006-01-02")
+	count := 0
+	rows := 0
+	channels := make(map[int]bool)
+	var subtitles []string
+	for _, program := range programs {
+		if program.Deleted || program.Count <= 0 || program.StartedAt.In(jst).Format("2006-01-02") != dateKey {
+			continue
+		}
+		if !program.Warn {
+			return nil, "schedule contains clean rows; warning-only recovery is not applicable"
+		}
+		if program.ChannelID <= 0 {
+			return nil, "warned schedule row has no channel identity"
+		}
+		if strings.TrimSpace(program.Subtitle) == "" {
+			return nil, "warned schedule row has no subtitle"
+		}
+		rows++
+		channels[program.ChannelID] = true
+		subtitles = append(subtitles, program.Subtitle)
+		if count == 0 {
+			count = program.Count
+		} else if program.Count != count {
+			return nil, fmt.Sprintf("warned schedule is ambiguous: episode counts %d and %d both air on %s", count, program.Count, dateKey)
+		}
+	}
+	if rows == 0 {
+		return nil, fmt.Sprintf("no warning-only schedule starts on %s", dateKey)
+	}
+	if len(channels) < 2 {
+		return nil, fmt.Sprintf("warned schedule episode %d is corroborated by only %d channel(s)", count, len(channels))
+	}
+
+	var matched *annict.Episode
+	matches := 0
+	for i := range episodes {
+		number, ok := matcher.EpisodeNumber(&episodes[i])
+		if !ok || number != count {
+			continue
+		}
+		matches++
+		matched = &episodes[i]
+	}
+	if matches != 1 {
+		return nil, fmt.Sprintf("warned schedule episode %d maps to %d Annict episodes", count, matches)
+	}
+	if strings.TrimSpace(matched.Title) == "" {
+		return nil, fmt.Sprintf("Annict episode %d has no subtitle to corroborate warned rows", count)
+	}
+	for _, subtitle := range subtitles {
+		if !normalize.Compare(matched.Title, subtitle) && !matcher.DateProvenSubtitleMatch(matched.Title, subtitle) {
+			return nil, fmt.Sprintf("warned schedule subtitle %q conflicts with Annict subtitle %q", subtitle, matched.Title)
+		}
+	}
+	if fileSubtitle != "" && !normalize.Compare(matched.Title, fileSubtitle) && !matcher.DateProvenSubtitleMatch(matched.Title, fileSubtitle) {
+		return nil, fmt.Sprintf("filename subtitle %q conflicts with Annict subtitle %q", fileSubtitle, matched.Title)
+	}
+
+	return matched, fmt.Sprintf("warning-only schedule corroborated Annict episode %d across %d channels and %d row(s)%s", count, len(channels), rows, subtitleEvidence(fileSubtitle))
 }
 
 // ResolveForChannel applies the same strict resolution after limiting schedule

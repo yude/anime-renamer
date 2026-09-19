@@ -947,6 +947,15 @@ func TestDateProvenSubtitleMatchAcceptsExplicitOtherSummary(t *testing.T) {
 	}
 }
 
+func TestDateProvenSubtitleMatchAcceptsExactKnownProviderDifference(t *testing.T) {
+	if !DateProvenSubtitleMatch("なにが起きてもおかしくはないのでは!!?", "なにが起きてもおかしくないのでは!!?") {
+		t.Fatal("DateProvenSubtitleMatch should accept the exact known Annict/Syobocal title pair")
+	}
+	if DateProvenSubtitleMatch("これは正しい題名です", "これは正し題名です") {
+		t.Fatal("DateProvenSubtitleMatch must not generalize the exact exception to arbitrary omissions")
+	}
+}
+
 func TestDateProvenSubtitleMatchAcceptsCompleteReorderedPartsOnly(t *testing.T) {
 	annictTitle := "台風です。／ネコカフェです。／妄想です。／愛してるゲームです。"
 	scheduleTitle := "台風です。／妄想です。／ネコカフェです。／愛してるゲームです。"

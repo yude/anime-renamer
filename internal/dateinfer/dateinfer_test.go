@@ -68,6 +68,48 @@ func TestResolveUniqueFailsClosed(t *testing.T) {
 	}
 }
 
+func TestResolveCorroboratedWarnedWithSubtitle(t *testing.T) {
+	jst := time.FixedZone("JST", 9*60*60)
+	date := time.Date(2022, 7, 24, 0, 0, 0, 0, jst)
+	episodes := []annict.Episode{{ID: 113, Number: number(13), Title: "なかなかうまくいかないねぇ"}}
+	programs := []syobocal.Program{
+		{PID: 1, Count: 13, ChannelID: 6, StartedAt: date.Add(time.Hour), Subtitle: "なかなかうまくいかないねぇ", Warn: true},
+		{PID: 2, Count: 13, ChannelID: 67, StartedAt: date.Add(2 * time.Hour), Subtitle: "なかなかうまくいかないねぇ", Warn: true},
+	}
+
+	episode, reason := ResolveCorroboratedWarnedWithSubtitle(date, episodes, programs, "")
+	if episode == nil || episode.ID != 113 || !strings.Contains(reason, "across 2 channels") {
+		t.Fatalf("ResolveCorroboratedWarnedWithSubtitle() = %+v, %q; want episode 113", episode, reason)
+	}
+}
+
+func TestResolveCorroboratedWarnedFailsClosed(t *testing.T) {
+	jst := time.FixedZone("JST", 9*60*60)
+	date := time.Date(2022, 7, 24, 0, 0, 0, 0, jst)
+	episodes := []annict.Episode{{ID: 113, Number: number(13), Title: "第十三話"}}
+	base := syobocal.Program{PID: 1, Count: 13, ChannelID: 6, StartedAt: date.Add(time.Hour), Subtitle: "第十三話", Warn: true}
+
+	for _, tt := range []struct {
+		name     string
+		programs []syobocal.Program
+		want     string
+	}{
+		{name: "one channel", programs: []syobocal.Program{base}, want: "only 1 channel"},
+		{name: "same channel repeated", programs: []syobocal.Program{base, {PID: 2, Count: 13, ChannelID: 6, StartedAt: date.Add(2 * time.Hour), Subtitle: "第十三話", Warn: true}}, want: "only 1 channel"},
+		{name: "different counts", programs: []syobocal.Program{base, {PID: 2, Count: 12, ChannelID: 67, StartedAt: date.Add(2 * time.Hour), Subtitle: "第十二話", Warn: true}}, want: "ambiguous"},
+		{name: "blank subtitle", programs: []syobocal.Program{base, {PID: 2, Count: 13, ChannelID: 67, StartedAt: date.Add(2 * time.Hour), Warn: true}}, want: "no subtitle"},
+		{name: "subtitle conflict", programs: []syobocal.Program{base, {PID: 2, Count: 13, ChannelID: 67, StartedAt: date.Add(2 * time.Hour), Subtitle: "別の話", Warn: true}}, want: "conflicts"},
+		{name: "mixed clean row", programs: []syobocal.Program{base, {PID: 2, Count: 13, ChannelID: 67, StartedAt: date.Add(2 * time.Hour), Subtitle: "第十三話"}}, want: "contains clean rows"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			episode, reason := ResolveCorroboratedWarnedWithSubtitle(date, episodes, tt.programs, "")
+			if episode != nil || !strings.Contains(reason, tt.want) {
+				t.Fatalf("ResolveCorroboratedWarnedWithSubtitle() = %+v, %q; want nil and substring %q", episode, reason, tt.want)
+			}
+		})
+	}
+}
+
 func TestResolveForChannelDisambiguatesDifferentCounts(t *testing.T) {
 	jst := time.FixedZone("JST", 9*60*60)
 	date := time.Date(2022, 8, 28, 0, 0, 0, 0, jst)

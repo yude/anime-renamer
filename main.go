@@ -716,6 +716,14 @@ func matchDateOnly(meta *parser.RecordingMetadata, works []annict.Work, episodes
 		}
 	}
 	if episode == nil {
+		if warnedEpisode, warnedReason := dateinfer.ResolveCorroboratedWarnedWithSubtitle(meta.RecordedDate, episodesByWork[work.ID], programs, meta.Subtitle); warnedEpisode != nil {
+			episode = warnedEpisode
+			reason = warnedReason
+		} else {
+			reason = fmt.Sprintf("%s; corroborated warning-only schedule also failed: %s", reason, warnedReason)
+		}
+	}
+	if episode == nil {
 		return nil, errors.New(reason)
 	}
 	return &matcher.MatchResult{
@@ -767,6 +775,14 @@ func matchDateOnlyAcrossWorks(meta *parser.RecordingMetadata, works []annict.Wor
 				} else {
 					reason = fmt.Sprintf("%s; trusted channel also failed: %s", reason, channelReason)
 				}
+			}
+		}
+		if episode == nil {
+			if warnedEpisode, warnedReason := dateinfer.ResolveCorroboratedWarnedWithSubtitle(meta.RecordedDate, episodesByWork[work.ID], programs, meta.Subtitle); warnedEpisode != nil {
+				episode = warnedEpisode
+				reason = warnedReason
+			} else {
+				reason = fmt.Sprintf("%s; corroborated warning-only schedule also failed: %s", reason, warnedReason)
 			}
 		}
 		if episode == nil {

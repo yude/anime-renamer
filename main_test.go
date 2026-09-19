@@ -722,6 +722,56 @@ func TestProcessFileResolvesDateOnlyFromUniqueSyobocalSchedule(t *testing.T) {
 	}
 }
 
+func TestProcessFileResolvesCuckooSlotTitleFromCorroboratedWarnedSchedule(t *testing.T) {
+	annictServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/graphql" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":{"searchWorks":{"edges":[
+			{"node":{"annictId":8458,"title":"カッコウの許嫁","syobocalTid":6330,"episodesCount":1,"episodes":{"edges":[
+				{"node":{"annictId":140711,"number":1,"numberText":"1羽目","sortNumber":100,"title":"私の彼氏になりなさいよ"}}
+			]}}}
+		]}}}`)
+	}))
+	defer annictServer.Close()
+
+	syobocalServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("TID"); got != "6330" {
+			t.Errorf("Syobocal TID = %q, want 6330", got)
+		}
+		fmt.Fprint(w, `<ProgLookupResponse><ProgItems>
+			<ProgItem><PID>1</PID><TID>6330</TID><StTime>2022-04-24 01:30:00</StTime><EdTime>2022-04-24 02:00:00</EdTime><Count>1</Count><Deleted>0</Deleted><Warn>1</Warn><ChID>6</ChID><STSubTitle>私の彼氏になりなさいよ</STSubTitle></ProgItem>
+			<ProgItem><PID>2</PID><TID>6330</TID><StTime>2022-04-24 01:30:00</StTime><EdTime>2022-04-24 02:00:00</EdTime><Count>1</Count><Deleted>0</Deleted><Warn>1</Warn><ChID>67</ChID><STSubTitle>私の彼氏になりなさいよ</STSubTitle></ProgItem>
+		</ProgItems><Result><Code>200</Code></Result></ProgLookupResponse>`)
+	}))
+	defer syobocalServer.Close()
+
+	dir := t.TempDir()
+	file := filepath.Join(dir, "[新]カッコウの許嫁　【ヌマニメーション】[字] (2022_04_24).mp4")
+	if err := os.WriteFile(file, []byte("recording"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result := processFile(
+		file,
+		annict.NewClientWithURLs("token", annictServer.URL, annictServer.URL+"/graphql"),
+		cache.NewDisabled(filepath.Join(dir, "cache")),
+		make(map[string][]annict.Work),
+		make(map[int][]annict.Episode),
+		make(map[programsCacheKey][]annict.Program),
+		make(map[string]string),
+		true,
+		false,
+		matcher.AutoRenameThreshold,
+		"",
+		&processingContext{syobocalClient: syobocal.NewClientWithBaseURL(syobocalServer.URL)},
+	)
+	if result.Error != nil || result.SkipReason != "" || !result.Previewed || result.WorkTitle != "カッコウの許嫁" || result.EpisodeNum != 1 {
+		t.Fatalf("processFile() = %+v, want warned-schedule episode 1 preview", result)
+	}
+}
+
 func TestProcessFileUsesDateToSelectRelatedSeason(t *testing.T) {
 	graphqlRequests := 0
 	annictServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

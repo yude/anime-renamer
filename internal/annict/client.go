@@ -378,6 +378,7 @@ var titleSearchAliases = map[string][]string{
 	normalize.NormalizeTitleForMatch("八月のシンデレラナイン２０２１"):                              {"八月のシンデレラナイン"},
 	normalize.NormalizeTitleForMatch("けいおん！番外編"):                                     {"けいおん！"},
 	normalize.NormalizeTitleForMatch("SAO SELECTION 特別版"):                            {"ソードアート・オンライン"},
+	normalize.NormalizeTitleForMatch("カッコウの許嫁 【ヌマニメーション】"):                           {"カッコウの許嫁"},
 }
 
 func punctuationAsSpaces(s string) string {
