@@ -856,6 +856,18 @@ func TestSubtitlesEquivalentStripsKomiSegmentNumber(t *testing.T) {
 	}
 }
 
+func TestSubtitlesEquivalentNormalizesOnlyTerminalPartSeparator(t *testing.T) {
+	if !subtitlesEquivalent("偶然のない夏休み・前編", "偶然のない夏休み(前編)") {
+		t.Fatal("terminal middle-dot and parenthetical 前編 presentations should match")
+	}
+	if subtitlesEquivalent("偶然のない夏休み・前編", "偶然のない夏休み(後編)") {
+		t.Fatal("前編 and 後編 must remain distinct")
+	}
+	if subtitlesEquivalent("ビーナスライン・シェルター", "ビーナスラインシェルター") {
+		t.Fatal("a semantic middle dot outside a terminal part label must remain significant")
+	}
+}
+
 func TestCompositeSubtitlePartMatch(t *testing.T) {
 	for _, tt := range []struct {
 		name               string

@@ -45,6 +45,7 @@ var zeroEpisodeLabelPattern = regexp.MustCompile(`(?i)^life[.\s]*0+(?:\s|$)`)
 var spacedKatakanaReadingPattern = regexp.MustCompile(`([\p{L}\p{N}])[\s\x{3000}]+([（(][\p{Katakana}ー・･\s\x{3000}]{6,}[）)])`)
 var subtitleOtherSummarySuffix = regexp.MustCompile(`[\s\x{3000}]*(?:ほか|他)(?:[\s\x{3000}]*[0-9０-９〇一二三四五六七八九十]+[\s\x{3000}]*本)?[\s\x{3000}]*$`)
 var repeatedMiddleDots = regexp.MustCompile(`・{2,}`)
+var trailingPartMiddleDot = regexp.MustCompile(`・(前編|後編)$`)
 
 var subtitleOrthographyReplacer = strings.NewReplacer(
 	"やがて雨は止んで", "やがて雨はやんで",
@@ -1070,6 +1071,11 @@ func slashSubtitleParts(s string) []string {
 func subtitleIdentityKey(s string) string {
 	key := normalize.NormalizeSubtitleForMatch(s)
 	key = subtitleEpisodeLabelPrefix.ReplaceAllString(key, "")
+	// A middle dot immediately before a terminal 前編/後編 label is only a
+	// separator in some providers (others use parentheses). Keep all other
+	// middle dots, and keep the qualifier itself, so 前編 and 後編 remain
+	// distinct episode identities.
+	key = trailingPartMiddleDot.ReplaceAllString(key, "$1")
 	// Terminal question/exclamation marks are frequently added by the EPG but
 	// omitted from Annict (or vice versa). Ignore only a trailing run so the
 	// semantic punctuation inside a subtitle remains part of its identity.
