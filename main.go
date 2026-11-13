@@ -22,6 +22,7 @@ import (
 	"github.com/yude/anime-renamer/internal/parser"
 	"github.com/yude/anime-renamer/internal/renamer"
 	"github.com/yude/anime-renamer/internal/syobocal"
+	"github.com/yude/anime-renamer/internal/tsmeta"
 )
 
 func main() {
@@ -32,6 +33,7 @@ func main() {
 	confidenceThreshold := flag.Int("confidence", matcher.AutoRenameThreshold, "Minimum confidence for auto-rename")
 	outputDir := flag.String("output", "", "Output directory (default: same as input)")
 	epgstationURL := flag.String("epgstation-url", "", "EPGStation URL for recording-history recovery (or EPGSTATION_URL)")
+	tsMetadata := flag.Bool("ts-metadata", true, "Use verified embedded broadcast metadata in .ts/.m2ts recordings")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "anime-renamer - Annict-based recording file renamer\n\n")
@@ -117,6 +119,9 @@ func main() {
 	programsCache := make(map[programsCacheKey][]annict.Program)
 	plannedDestinations := make(map[string]string)
 	processing := &processingContext{syobocalClient: syobocalClient, batchSchedule: batchSchedule, epgstationClient: epgClient}
+	if *tsMetadata {
+		processing.tsMetadataReader = tsmeta.ReadFile
+	}
 
 	renamed := 0
 	previewed := 0
@@ -174,6 +179,7 @@ type processingContext struct {
 	batchSchedule    *batchScheduleContext
 	epgstationClient epgstationRecordingClient
 	syobocalChannels []syobocal.Channel
+	tsMetadataReader func(string) (*tsmeta.Broadcast, error)
 }
 
 type channelAnchorState struct {
@@ -284,6 +290,30 @@ func processFile(
 		meta = corrected
 		fmt.Fprintf(os.Stderr, "  Fallback:  verified work/episode-specific subtitle spelling: %q\n", meta.Subtitle)
 	}
+	var embedded *embeddedRecording
+	if runtime != nil && runtime.tsMetadataReader != nil && isTransportStream(file) {
+		broadcast, readErr := runtime.tsMetadataReader(file)
+		if errors.Is(readErr, tsmeta.ErrAmbiguous) {
+			return &renamer.RenameResult{OriginalPath: file, SkipReason: readErr.Error()}
+		}
+		if readErr == nil && broadcast != nil {
+			fileMeta, parseErr := parser.ParseBroadcastFilename(baseName)
+			if parseErr != nil {
+				return &renamer.RenameResult{OriginalPath: file, SkipReason: fmt.Sprintf("TS filename could not be verified: %v", parseErr)}
+			}
+			if corrected, ok := matcher.CorrectMetadataSubtitle(fileMeta); ok {
+				fileMeta = corrected
+			}
+			meta = fileMeta
+			meta, embedded, err = mergeEmbeddedRecording(meta, broadcast)
+			if err != nil {
+				return &renamer.RenameResult{OriginalPath: file, SkipReason: fmt.Sprintf("TS EPG conflicts with the filename: %v", err)}
+			}
+			fmt.Fprintf(os.Stderr, "  TS EPG:    Work=%q Episode=%s Subtitle=%q Channel=%q Start=%s\n", meta.WorkTitle, matcher.MetadataEpisodeLabel(meta), meta.Subtitle, broadcast.Channel, broadcast.StartedAt.Format(time.RFC3339))
+		} else if verbose {
+			fmt.Fprintf(os.Stderr, "  TS EPG:    unavailable (%v); using existing filename/history checks\n", readErr)
+		}
+	}
 	if standaloneCandidate(meta) {
 		return processStandaloneRecording(file, meta, client, c, workCache, episodesCache, plannedDestinations, dryRun, confidenceThreshold, outputDir, runtime)
 	}
@@ -347,7 +377,8 @@ func processFile(
 	// only date-only candidates and numbered files that can serve as batch
 	// anchors, leaving unrelated numbered paths on their existing cache flow.
 	needsAnchorMetadata := runtime != nil && runtime.batchSchedule != nil && runtime.batchSchedule.wantsAnchors(meta.WorkTitle, works[0].Title)
-	if (dateBackedRecovery || needsAnchorMetadata) && len(works) == 1 && works[0].SyobocalTID == "" {
+	needsEmbeddedSchedule := embedded != nil && ((embedded.metadata.EpisodeNumber <= 0 && embedded.metadata.EpisodeLabel == "") || embedded.metadata.Subtitle == "")
+	if (dateBackedRecovery || needsAnchorMetadata || needsEmbeddedSchedule) && len(works) == 1 && works[0].SyobocalTID == "" {
 		originalWork := works[0]
 		refreshed, refreshErr := refreshWorkMetadata(client, c, meta.WorkTitle, workCache, episodesCache)
 		if refreshErr != nil && dateOnlyRecovery {
@@ -397,7 +428,11 @@ func processFile(
 			scheduleClient = runtime.syobocalClient
 			batchSchedule = runtime.batchSchedule
 		}
-		result, err = matchDateOnly(meta, works, episodesCache, c, scheduleClient, batchSchedule)
+		if embedded != nil {
+			result, err = matchEmbeddedSchedule(meta, embedded, works, episodesCache, c, runtime)
+		} else {
+			result, err = matchDateOnly(meta, works, episodesCache, c, scheduleClient, batchSchedule)
+		}
 		if err != nil && len(works) == 1 {
 			relatedWorks, relatedErr := searchRelatedWorks(client, c, meta.WorkTitle, workCache, episodesCache)
 			if relatedErr == nil && len(relatedWorks) > len(works) {
@@ -566,6 +601,13 @@ func processFile(
 				}
 			}
 		}
+	}
+
+	if embedded != nil {
+		if err := verifyEmbeddedMatch(meta, embedded, result, works, episodesCache, c, runtime); err != nil {
+			return &renamer.RenameResult{OriginalPath: file, SkipReason: fmt.Sprintf("TS EPG could not corroborate the Annict match: %v", err)}
+		}
+		result.Reasons = append(result.Reasons, "embedded present EIT, broadcast clock, PAT/PMT and SDT identified the recorded programme")
 	}
 
 	// Always show match result (even without --verbose)

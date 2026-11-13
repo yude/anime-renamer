@@ -328,6 +328,18 @@ func earliestEpisodeMatch(name string, patterns ...*regexp.Regexp) []int {
 //
 // Variations in episode notation are supported.
 func ParseFilename(filename string) (*RecordingMetadata, error) {
+	return parseFilename(filename, false)
+}
+
+// ParseBroadcastFilename also retains the entire unquoted text following an
+// explicit episode marker. This stricter evidence is used only when embedded
+// TS programme metadata is available, and must be corroborated against Annict.
+// Ordinary filename-only matching retains its existing annotation handling.
+func ParseBroadcastFilename(filename string) (*RecordingMetadata, error) {
+	return parseFilename(filename, true)
+}
+
+func parseFilename(filename string, broadcast bool) (*RecordingMetadata, error) {
 	name := filename
 
 	// 1. Remove extension
@@ -537,11 +549,10 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 			}
 		} else {
 			subtitle = firstQuotedContent(afterEp)
-			if subtitle == "" && genericAnimeEPG && finalEpisode {
-				// Some generic-anime EPG rows expose the finale subtitle as
-				// unquoted text after an otherwise explicit 第N話 marker. Limit
-				// this fallback to [終] rows so ordinary trailing annotations do
-				// not silently become episode identity.
+			if subtitle == "" && (broadcast || genericAnimeEPG && finalEpisode) {
+				// Preserve the complete unquoted tail as evidence for embedded
+				// broadcast matching. Filename-only matching remains limited to
+				// generic-anime finale rows; ordinary annotations stay excluded.
 				subtitle = stripTrailingMetadataTags(strings.TrimSpace(afterEp))
 			}
 		}
