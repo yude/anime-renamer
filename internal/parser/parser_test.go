@@ -30,7 +30,7 @@ func TestKanjiToInt(t *testing.T) {
 
 func TestParseFilenameAmbiguousEpisodeError(t *testing.T) {
 	for _, input := range []string{
-		"作品 #05.5「総集編」.mp4",
+		"作品 #05.5,06「総集編」.mp4",
 		"作品 #01,02「第一話 ／ 第二話」.mp4",
 		"作品 10話／11話.mp4",
 	} {
@@ -73,6 +73,7 @@ func TestParseFilename(t *testing.T) {
 		input     string
 		wantTitle string
 		wantEp    int
+		wantLabel string
 		wantSub   string
 		wantDate  time.Time
 		wantFinal bool
@@ -1032,14 +1033,18 @@ func TestParseFilename(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "fractional hash episode is rejected",
-			input:   "作品 #05.5「総集編」.mp4",
-			wantErr: true,
+			name:      "fractional hash episode retains its public label",
+			input:     "作品 #05.5「総集編」.mp4",
+			wantTitle: "作品",
+			wantSub:   "総集編",
+			wantLabel: "5.5",
 		},
 		{
-			name:    "fractional numbered episode is rejected",
-			input:   "作品 第6．5話「総集編」.mp4",
-			wantErr: true,
+			name:      "fractional numbered episode retains its public label",
+			input:     "作品 第6．5話「総集編」.mp4",
+			wantTitle: "作品",
+			wantSub:   "総集編",
+			wantLabel: "6.5",
 		},
 		{
 			name:    "multiple hash episodes are rejected",
@@ -1110,6 +1115,9 @@ func TestParseFilename(t *testing.T) {
 			}
 			if got.EpisodeNumber != tt.wantEp {
 				t.Errorf("EpisodeNumber = %d, want %d", got.EpisodeNumber, tt.wantEp)
+			}
+			if got.EpisodeLabel != tt.wantLabel {
+				t.Errorf("EpisodeLabel = %q, want %q", got.EpisodeLabel, tt.wantLabel)
 			}
 			if got.Subtitle != tt.wantSub {
 				t.Errorf("Subtitle = %q, want %q", got.Subtitle, tt.wantSub)

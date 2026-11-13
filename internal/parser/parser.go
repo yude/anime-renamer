@@ -15,17 +15,16 @@ import (
 type RecordingMetadata struct {
 	WorkTitle     string
 	EpisodeNumber int
+	EpisodeLabel  string // Exact public fractional label; never truncated into EpisodeNumber.
 	Subtitle      string
 	RecordedDate  time.Time
 	FinalEpisode  bool
 }
 
 var (
-	// ErrAmbiguousEpisode is returned when one recording names more than one
-	// episode or uses a fractional episode number. The current matcher and
-	// output format represent exactly one positive integer episode, so accepting
-	// only the first integer would silently rename the recording as a different
-	// episode.
+	// ErrAmbiguousEpisode is returned when one recording names multiple
+	// episodes or has an unsafe numeric continuation. A single explicit decimal
+	// label is retained separately and never truncated into an integer.
 	ErrAmbiguousEpisode = errors.New("ambiguous episode notation")
 
 	// ErrUnsupportedEpisode is returned when a filename explicitly contains an
@@ -370,6 +369,9 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 		if notation := pattern.FindString(name); notation != "" {
 			return nil, fmt.Errorf("%w non-episode content %q in %q", ErrUnsupportedEpisode, notation, filename)
 		}
+	}
+	if fractional, found, err := parseFractionalFilename(name, recordedDate); found {
+		return fractional, err
 	}
 	if notation := ambiguousEpisodeNotation(name); notation != "" {
 		return nil, fmt.Errorf("%w %q in %q", ErrAmbiguousEpisode, notation, filename)

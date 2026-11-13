@@ -78,6 +78,7 @@ type RenameResult struct {
 	NewPath      string
 	WorkTitle    string
 	EpisodeNum   int
+	EpisodeLabel string
 	Subtitle     string
 	Confidence   int
 	Renamed      bool
@@ -88,15 +89,18 @@ type RenameResult struct {
 
 // BuildPath generates the destination path from a match result.
 func BuildPath(originalPath string, result *matcher.MatchResult) (string, error) {
-	if result == nil || result.Work == nil || result.Episode == nil {
+	if result == nil || result.Work == nil || (result.Episode == nil && result.RecordingEpisode == nil && !result.Standalone) {
 		return "", fmt.Errorf("incomplete match result")
 	}
 
-	// Episode number: use Number when it is a supported positive integer,
-	// otherwise use SortNumber only when Number is absent.
-	epNum, ok := matcher.MatchResultEpisodeNumber(result)
-	if !ok {
+	// The matcher must supply a verified public label. Fractional labels remain
+	// decimal strings; a whole standalone movie has no episode label.
+	epLabel, ok := matcher.MatchResultEpisodeLabel(result)
+	if !result.Standalone && !ok {
 		return "", fmt.Errorf("invalid episode number")
+	}
+	if result.Standalone && (strings.ToLower(result.Work.Media) != "movie" || result.Episode != nil || result.RecordingEpisode != nil || result.OutputEpisodeLabel != "" || result.OutputNumberSet || result.OutputEpisodeNumber != 0) {
+		return "", fmt.Errorf("invalid standalone movie result")
 	}
 
 	// Build output path: <dir>/<WorkTitle>/<WorkTitle> #<N> 「<Subtitle>」.mp4
@@ -120,7 +124,12 @@ func BuildPath(originalPath string, result *matcher.MatchResult) (string, error)
 
 	// Use the file subtitle when the matcher established that Annict has no
 	// usable title (including a known API placeholder).
-	subtitle := result.Episode.Title
+	subtitle := ""
+	if result.Episode != nil {
+		subtitle = result.Episode.Title
+	} else if result.RecordingEpisode != nil {
+		subtitle = result.RecordingEpisode.Subtitle
+	}
 	if result.FileSubtitle != "" {
 		subtitle = result.FileSubtitle
 	}
@@ -133,7 +142,13 @@ func BuildPath(originalPath string, result *matcher.MatchResult) (string, error)
 		ext = ".mp4"
 	}
 
-	filename, err := buildFilename(workTitle, epNum, subtitle, ext)
+	if result.Standalone {
+		if len(workTitle+ext) > maxFilenameBytes {
+			return "", fmt.Errorf("standalone movie filename exceeds component limit")
+		}
+		return filepath.Join(workDir, workTitle+ext), nil
+	}
+	filename, err := buildLabeledFilename(workTitle, epLabel, subtitle, ext)
 	if err != nil {
 		return "", err
 	}
@@ -145,8 +160,12 @@ func BuildPath(originalPath string, result *matcher.MatchResult) (string, error)
 // work title, episode number, and extension. When the official subtitle would
 // exceed the per-component filesystem limit, only that subtitle is shortened.
 func buildFilename(workTitle string, episode int, subtitle, ext string) (string, error) {
+	return buildLabeledFilename(workTitle, fmt.Sprint(episode), subtitle, ext)
+}
+
+func buildLabeledFilename(workTitle, episode, subtitle, ext string) (string, error) {
 	if subtitle != "" {
-		prefix := fmt.Sprintf("%s #%d 「", workTitle, episode)
+		prefix := fmt.Sprintf("%s #%s 「", workTitle, episode)
 		suffix := "」" + ext
 		remaining := maxFilenameBytes - len(prefix) - len(suffix)
 		if remaining > 0 {
@@ -158,7 +177,7 @@ func buildFilename(workTitle string, episode int, subtitle, ext string) (string,
 		}
 	}
 
-	suffix := fmt.Sprintf(" #%d%s", episode, ext)
+	suffix := fmt.Sprintf(" #%s%s", episode, ext)
 	remaining := maxFilenameBytes - len(suffix)
 	if remaining <= 0 {
 		return "", fmt.Errorf("episode and extension exceed filename limit")
@@ -241,7 +260,12 @@ func RenameWithReservations(originalPath string, result *matcher.MatchResult, dr
 
 	r.WorkTitle = result.Work.Title
 	r.EpisodeNum, _ = matcher.MatchResultEpisodeNumber(result)
-	r.Subtitle = result.Episode.Title
+	r.EpisodeLabel, _ = matcher.MatchResultEpisodeLabel(result)
+	if result.Episode != nil {
+		r.Subtitle = result.Episode.Title
+	} else if result.RecordingEpisode != nil {
+		r.Subtitle = result.RecordingEpisode.Subtitle
+	}
 	if result.FileSubtitle != "" {
 		r.Subtitle = result.FileSubtitle
 	}

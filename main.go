@@ -268,7 +268,7 @@ func processFile(
 		if errors.Is(err, parser.ErrAmbiguousEpisode) || errors.Is(err, parser.ErrUnsupportedEpisode) {
 			return &renamer.RenameResult{
 				OriginalPath: file,
-				SkipReason:   fmt.Sprintf("cannot represent as one positive integer episode: %v", err),
+				SkipReason:   fmt.Sprintf("cannot represent as one supported episode: %v", err),
 			}
 		}
 		return &renamer.RenameResult{
@@ -277,18 +277,25 @@ func processFile(
 		}
 	}
 
-	fmt.Fprintf(os.Stderr, "  Parsed:    Work=%q Episode=%d Subtitle=%q Date=%s\n",
-		meta.WorkTitle, meta.EpisodeNumber, meta.Subtitle,
+	fmt.Fprintf(os.Stderr, "  Parsed:    Work=%q Episode=%s Subtitle=%q Date=%s\n",
+		meta.WorkTitle, matcher.MetadataEpisodeLabel(meta), meta.Subtitle,
 		meta.RecordedDate.Format("2006-01-02"))
+	if corrected, ok := matcher.CorrectMetadataSubtitle(meta); ok {
+		meta = corrected
+		fmt.Fprintf(os.Stderr, "  Fallback:  verified work/episode-specific subtitle spelling: %q\n", meta.Subtitle)
+	}
+	if standaloneCandidate(meta) {
+		return processStandaloneRecording(file, meta, client, c, workCache, episodesCache, plannedDestinations, dryRun, confidenceThreshold, outputDir, runtime)
+	}
 	if mapped, ok := mapVerifiedSelectionEpisode(meta); ok {
 		meta = mapped
 		fmt.Fprintf(os.Stderr, "  Fallback:  verified selection schedule maps to Work=%q Episode=%d Subtitle=%q\n",
 			meta.WorkTitle, meta.EpisodeNumber, meta.Subtitle)
 	}
-	numberlessRecovery := meta.EpisodeNumber <= 0
+	numberlessRecovery := meta.EpisodeNumber <= 0 && meta.EpisodeLabel == ""
 	dateOnlyRecovery := isDateOnlyRecoveryCandidate(meta)
 	dateBackedRecovery := isDateBackedRecoveryCandidate(meta)
-	if meta.EpisodeNumber <= 0 && meta.Subtitle == "" && !meta.FinalEpisode && !dateOnlyRecovery {
+	if meta.EpisodeNumber <= 0 && meta.EpisodeLabel == "" && meta.Subtitle == "" && !meta.FinalEpisode && !dateOnlyRecovery {
 		return &renamer.RenameResult{
 			OriginalPath: file,
 			SkipReason:   fmt.Sprintf("no supported single episode number, subtitle, or final-episode marker found in %q", baseName),
@@ -322,7 +329,7 @@ func processFile(
 	}
 
 	if len(works) == 0 {
-		if numberlessRecovery {
+		if numberlessRecovery || meta.EpisodeLabel != "" {
 			return &renamer.RenameResult{
 				OriginalPath: file,
 				SkipReason:   fmt.Sprintf("numberless episode could not identify an Annict work for %q", meta.WorkTitle),
@@ -378,7 +385,12 @@ func processFile(
 	// participate in work disambiguation, so fetching them for every work
 	// candidate wastes one API request per rejected candidate.
 	var result *matcher.MatchResult
-	if dateOnlyRecovery {
+	if meta.EpisodeLabel != "" {
+		result = matcher.Match(meta, works, episodesCache, nil)
+		if result == nil {
+			return &renamer.RenameResult{OriginalPath: file, SkipReason: fmt.Sprintf("fractional episode %s could not be uniquely verified against Annict", meta.EpisodeLabel)}
+		}
+	} else if dateOnlyRecovery {
 		var scheduleClient syobocalProgramClient
 		var batchSchedule *batchScheduleContext
 		if runtime != nil {
@@ -566,8 +578,8 @@ func processFile(
 		fmt.Fprintf(os.Stderr, "  Annict detail:\n")
 		fmt.Fprintf(os.Stderr, "    Work:      %s (ID: %d, season: %s)\n", result.Work.Title, result.Work.ID, result.Work.SeasonName)
 		if result.Episode != nil {
-			epNum, _ := matcher.MatchResultEpisodeNumber(result)
-			fmt.Fprintf(os.Stderr, "    Episode:   %d - %s (ID: %d)\n", epNum, result.Episode.Title, result.Episode.ID)
+			epLabel, _ := matcher.MatchResultEpisodeLabel(result)
+			fmt.Fprintf(os.Stderr, "    Episode:   %s - %s (ID: %d)\n", epLabel, result.Episode.Title, result.Episode.ID)
 		}
 		if result.Program != nil {
 			fmt.Fprintf(os.Stderr, "    Program:   %s (rebroadcast: %v, channel: %s)\n",
@@ -609,6 +621,10 @@ func processFile(
 	// Step 7: Rename (or preview in dry-run mode). Existing filesystem entries
 	// and earlier batch reservations are preserved under duplicate/ with a
 	// one-based suffix instead of being overwritten or dropped.
+	return renameMatchedRecording(file, result, dryRun, outputDir, plannedDestinations)
+}
+
+func renameMatchedRecording(file string, result *matcher.MatchResult, dryRun bool, outputDir string, plannedDestinations map[string]string) *renamer.RenameResult {
 	result2 := renamer.RenameWithReservations(file, result, dryRun, outputDir, plannedDestinations)
 	if result2.Error != nil {
 		return result2
@@ -628,7 +644,7 @@ func isDateOnlyRecoveryCandidate(meta *parser.RecordingMetadata) bool {
 }
 
 func isDateBackedRecoveryCandidate(meta *parser.RecordingMetadata) bool {
-	if meta == nil || meta.EpisodeNumber > 0 || meta.FinalEpisode || meta.RecordedDate.IsZero() {
+	if meta == nil || meta.EpisodeNumber > 0 || meta.EpisodeLabel != "" || meta.FinalEpisode || meta.RecordedDate.IsZero() {
 		return false
 	}
 	title := normalize.Normalize(meta.WorkTitle)

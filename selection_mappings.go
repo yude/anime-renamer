@@ -86,7 +86,7 @@ func selectionKey(title string, number int, date string) selectionEpisodeKey {
 }
 
 func mapVerifiedSelectionEpisode(meta *parser.RecordingMetadata) (*parser.RecordingMetadata, bool) {
-	if meta == nil || meta.EpisodeNumber < 0 || meta.RecordedDate.IsZero() {
+	if meta == nil || meta.EpisodeNumber < 0 || meta.EpisodeLabel != "" || meta.RecordedDate.IsZero() {
 		return meta, false
 	}
 	key := selectionKey(meta.WorkTitle, meta.EpisodeNumber, meta.RecordedDate.Format("2006-01-02"))

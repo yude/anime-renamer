@@ -23,9 +23,12 @@ type MatchResult struct {
 	Program             *annict.Program
 	Confidence          int
 	Reasons             []string
-	FileSubtitle        string // Subtitle parsed from filename, used when Annict has no subtitle
-	OutputEpisodeNumber int    // Explicit public label matched in the filename, when different from Annict's local Number
-	OutputNumberSet     bool   // Distinguishes an explicitly verified episode zero from no override
+	FileSubtitle        string            // Subtitle parsed from filename, used when Annict has no subtitle
+	OutputEpisodeNumber int               // Explicit public label matched in the filename, when different from Annict's local Number
+	OutputNumberSet     bool              // Distinguishes an explicitly verified episode zero from no override
+	OutputEpisodeLabel  string            // Verified fractional label from Annict.
+	RecordingEpisode    *RecordingEpisode // An independently verified special absent from Annict's episode list.
+	Standalone          bool              // Whole movie identity; no episode number is invented.
 }
 
 // Confidence thresholds
@@ -120,6 +123,9 @@ func MatchRelated(meta *parser.RecordingMetadata, works []annict.Work, episodesB
 }
 
 func match(meta *parser.RecordingMetadata, works []annict.Work, episodesByWork map[int][]annict.Episode, programsByWork map[int][]annict.Program, includeRelated bool) *MatchResult {
+	if meta.EpisodeLabel != "" {
+		return matchFractional(meta, works, episodesByWork)
+	}
 	if len(works) == 0 {
 		return nil
 	}
@@ -746,6 +752,9 @@ func EpisodeNumber(e *annict.Episode) (int, bool) {
 	if e == nil {
 		return 0, false
 	}
+	if hasFractionalIdentity(e) {
+		return 0, false
+	}
 	if e.Number != nil {
 		number := *e.Number
 		if number <= 0 || math.Trunc(number) != number {
@@ -768,7 +777,7 @@ func EpisodeNumber(e *annict.Episode) (int, bool) {
 // the continuous broadcast label (for example Number=5, NumberText=第44話).
 // The override is populated only when that explicit label matched the input.
 func MatchResultEpisodeNumber(result *MatchResult) (int, bool) {
-	if result == nil || result.Episode == nil {
+	if result == nil || result.Episode == nil || result.OutputEpisodeLabel != "" || result.RecordingEpisode != nil || result.Standalone {
 		return 0, false
 	}
 	if result.OutputNumberSet || result.OutputEpisodeNumber > 0 {
@@ -827,6 +836,9 @@ func findMatchingEpisode(number int, subtitle string, episodes []annict.Episode)
 
 	for i := range episodes {
 		e := &episodes[i]
+		if hasFractionalIdentity(e) {
+			continue
+		}
 		if explicitZeroEpisodeMatches(e, subtitle) {
 			if zeroMatch != nil {
 				zeroAmbiguous = true
@@ -952,7 +964,7 @@ func explicitZeroEpisodeMatches(episode *annict.Episode, subtitle string) bool {
 }
 
 func specialSortNumberMatches(episode *annict.Episode, number int, subtitle string) bool {
-	if episode == nil || episode.Number != nil || strings.TrimSpace(episode.NumberText) == "" || episode.SortNumber != number || number <= 0 || subtitle == "" || episode.Title == "" {
+	if episode == nil || hasFractionalIdentity(episode) || episode.Number != nil || strings.TrimSpace(episode.NumberText) == "" || episode.SortNumber != number || number <= 0 || subtitle == "" || episode.Title == "" {
 		return false
 	}
 	if _, supported := episodeNumberFromText(episode.NumberText); supported {
@@ -981,7 +993,7 @@ func findDescriptiveSpecialByOrdinal(number int, subtitle string, episodes []ann
 }
 
 func descriptiveSpecialOrdinalMatches(episode *annict.Episode, episodes []annict.Episode, episodesCount, number int, subtitle string) bool {
-	if episode == nil || episode.Number != nil || number <= 0 || subtitle == "" || episode.Title == "" {
+	if episode == nil || hasFractionalIdentity(episode) || episode.Number != nil || number <= 0 || subtitle == "" || episode.Title == "" {
 		return false
 	}
 	numberText := strings.TrimSpace(episode.NumberText)

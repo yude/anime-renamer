@@ -18,15 +18,17 @@ import (
 const pageSize = 100
 
 type Recording struct {
-	ID          int64       `json:"id"`
-	ChannelID   int64       `json:"channelId"`
-	StartAt     int64       `json:"startAt"`
-	EndAt       int64       `json:"endAt"`
-	Name        string      `json:"name"`
-	Description string      `json:"description"`
-	IsRecording bool        `json:"isRecording"`
-	IsEncoding  bool        `json:"isEncoding"`
-	VideoFiles  []VideoFile `json:"videoFiles"`
+	ID          int64             `json:"id"`
+	ChannelID   int64             `json:"channelId"`
+	StartAt     int64             `json:"startAt"`
+	EndAt       int64             `json:"endAt"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Extended    string            `json:"extended"`
+	RawExtended map[string]string `json:"rawExtended"`
+	IsRecording bool              `json:"isRecording"`
+	IsEncoding  bool              `json:"isEncoding"`
+	VideoFiles  []VideoFile       `json:"videoFiles"`
 }
 
 type VideoFile struct {

@@ -37,6 +37,7 @@ func TestRecordingMetadataOnlyReadsExplicitHeaders(t *testing.T) {
 	meta := &parser.RecordingMetadata{WorkTitle: "作品", RecordedDate: time.Date(2026, 11, 1, 0, 0, 0, 0, time.FixedZone("JST", 9*60*60))}
 	for _, tt := range []struct {
 		description, title, subtitle string
+		label                        string
 		number                       int
 		wantErr                      bool
 	}{
@@ -46,7 +47,7 @@ func TestRecordingMetadataOnlyReadsExplicitHeaders(t *testing.T) {
 		{description: "第七話　秘密", title: "作品", subtitle: "秘密", number: 7},
 		{description: "前回の第4話から物語が動く。", title: "作品"},
 		{description: "番組内容\n第4話「別作品の紹介」", title: "作品"},
-		{description: "第4．5話「総集編」", wantErr: true},
+		{description: "第4．5話「総集編」", title: "作品", subtitle: "総集編", label: "4.5"},
 		{description: "#4,5「結合」", wantErr: true},
 		{description: "第4話／第5話", wantErr: true},
 		{description: "第0話「前日譚」", wantErr: true},
@@ -57,7 +58,7 @@ func TestRecordingMetadataOnlyReadsExplicitHeaders(t *testing.T) {
 				if err == nil {
 					t.Fatalf("recordingMetadata() = %+v, want rejection", got)
 				}
-			} else if err != nil || got.WorkTitle != tt.title || got.Subtitle != tt.subtitle || got.EpisodeNumber != tt.number {
+			} else if err != nil || got.WorkTitle != tt.title || got.Subtitle != tt.subtitle || got.EpisodeNumber != tt.number || got.EpisodeLabel != tt.label {
 				t.Fatalf("recordingMetadata() = %+v, %v; want title=%q subtitle=%q number=%d", got, err, tt.title, tt.subtitle, tt.number)
 			}
 		})

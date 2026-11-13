@@ -26,7 +26,7 @@ type epgstationRecordingClient interface {
 
 // Only a leading episode header may supply an episode or a work qualifier.
 // References to other episodes elsewhere in a synopsis are never parsed.
-var recordedEpisodeHeader = regexp.MustCompile(`(?i)^[\s\x{3000}]*(?:([~〜～][^~〜～\r\n]+[~〜～])[\s\x{3000}]*)?((?:第[\s\x{3000}]*[0-9０-９〇一二三四五六七八九十百壱弐参拾]+[\s\x{3000}]*話|[#＃♯][\s\x{3000}]*[0-9０-９]+|(?:chapter|episode|ep|score)[.．\s\x{3000}]*[0-9０-９]+))(.*)$`)
+var recordedEpisodeHeader = regexp.MustCompile(`(?i)^[\s\x{3000}]*(?:([~〜～][^~〜～\r\n]+[~〜～])[\s\x{3000}]*)?((?:第[\s\x{3000}]*[0-9０-９〇一二三四五六七八九十百壱弐参拾]+(?:[.．][0-9０-９]+)?[\s\x{3000}]*話|[#＃♯][\s\x{3000}]*[0-9０-９]+(?:[.．][0-9０-９]+)?|(?:chapter|episode|ep|score)[.．\s\x{3000}]*[0-9０-９]+(?:[.．][0-9０-９]+)?))(.*)$`)
 
 var recordedEpisodeLikeHeader = regexp.MustCompile(`(?i)^[\s\x{3000}]*(?:[~〜～][^~〜～\r\n]+[~〜～][\s\x{3000}]*)?(?:第|[#＃♯]|chapter|episode|ep|score)[.．\s\x{3000}]*[0-9０-９〇一二三四五六七八九十百壱弐参拾]`)
 
@@ -45,21 +45,30 @@ func recordingMetadata(meta *parser.RecordingMetadata, record *epgstation.Record
 		if recordedEpisodeLikeHeader.MatchString(line) {
 			return nil, fmt.Errorf("EPGStation description has an unsupported episode header")
 		}
+		if special, found, err := fractionalRecordingContents(parsed, record); found || err != nil {
+			return special, err
+		}
 		return parsed, nil
 	}
 	title := strings.TrimSpace(parsed.WorkTitle + " " + header[1])
 	description, err := parser.ParseFilename(title + " " + header[2] + header[3] + " (" + date + ").ts")
-	if err != nil || description.EpisodeNumber <= 0 {
+	if err != nil || (description.EpisodeNumber <= 0 && description.EpisodeLabel == "") {
 		return nil, fmt.Errorf("EPGStation description has no safe single episode header: %v", err)
 	}
 	if normalize.NormalizeTitleForMatch(description.WorkTitle) != normalize.NormalizeTitleForMatch(title) {
 		return nil, fmt.Errorf("EPGStation description has an ambiguous work/episode boundary")
 	}
-	if parsed.EpisodeNumber > 0 && parsed.EpisodeNumber != description.EpisodeNumber {
+	if (parsed.EpisodeNumber > 0 && matcher.MetadataEpisodeLabel(parsed) != matcher.MetadataEpisodeLabel(description)) || (parsed.EpisodeLabel != "" && parsed.EpisodeLabel != description.EpisodeLabel) {
 		return nil, fmt.Errorf("EPGStation name and description have conflicting episode numbers")
 	}
 	if description.Subtitle == "" {
 		description.Subtitle = strings.TrimSpace(header[3])
+	}
+	if corrected, ok := matcher.CorrectMetadataSubtitle(description); ok {
+		description = corrected
+	}
+	if special, found, err := fractionalRecordingContents(description, record); found || err != nil {
+		return special, err
 	}
 	return description, nil
 }
@@ -87,6 +96,20 @@ func matchEPGStationRecording(filename string, meta *parser.RecordingMetadata, c
 		return nil, fmt.Errorf("recording metadata leaves %d Annict work candidates", len(works))
 	}
 	work := works[0]
+	if metadata.EpisodeLabel != "" {
+		if result := matcher.Match(metadata, works, ec, nil); result != nil {
+			result.Reasons = append(result.Reasons, fmt.Sprintf("EPGStation recording %d supplied an explicit fractional label", record.ID))
+			return result, nil
+		}
+		if work.Media == "" {
+			fresh, refreshErr := refreshWorkMetadata(client, c, metadata.WorkTitle, wc, ec)
+			if refreshErr != nil || len(fresh) != 1 || fresh[0].ID != work.ID {
+				return nil, fmt.Errorf("special recording work metadata could not be refreshed: %v", refreshErr)
+			}
+			work = fresh[0]
+		}
+		return matchVerifiedRecordingSpecial(metadata, record, work, runtime)
+	}
 	tid, err := strconv.Atoi(work.SyobocalTID)
 	if err != nil || tid <= 0 {
 		return nil, fmt.Errorf("recording work has no valid Syobocal TID")

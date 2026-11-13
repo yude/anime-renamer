@@ -132,6 +132,7 @@ type graphqlSearchWorksResponse struct {
 type graphqlWorkNode struct {
 	AnnictID      int    `json:"annictId"`
 	Title         string `json:"title"`
+	Media         string `json:"media"`
 	TitleKana     string `json:"titleKana"`
 	SyobocalTID   *int   `json:"syobocalTid"`
 	SeasonName    string `json:"seasonName"`
@@ -181,6 +182,7 @@ func (c *Client) searchWorksGraphQL(title string) ([]Work, map[int][]Episode, er
       node {
         annictId
         title
+        media
         titleKana
         syobocalTid
         seasonName
@@ -251,6 +253,7 @@ func (c *Client) searchWorksGraphQL(title string) ([]Work, map[int][]Episode, er
 			ID:            node.AnnictID,
 			AnnictID:      node.AnnictID,
 			Title:         node.Title,
+			Media:         strings.ToLower(node.Media),
 			TitleKana:     node.TitleKana,
 			SeasonName:    graphqlSeason(node.SeasonYear, node.SeasonName),
 			EpisodesCount: node.EpisodesCount,
@@ -387,6 +390,7 @@ var titleSearchAliases = map[string][]string{
 	normalize.NormalizeTitleForMatch("ヘルモード ~やり込み好きのゲーマーは廃設定の異世界で無双する~2"):            {"ヘルモード ～やり込み好きのゲーマーは廃設定の異世界で無双する～ 2nd Season"},
 	normalize.NormalizeTitleForMatch("マウスカーソルで現実を操作できるようになったので女の子をいっぱいクリックします"):      {"マウスカーソルで現実を操作できるようになったので、女の子をいっぱいクリックしまーす"},
 	normalize.NormalizeTitleForMatch("目覚めたら最強装備と宇宙船持ちだったので一戸建て目指して傭兵として自由に生きたい"):     {"目覚めたら最強装備と宇宙船持ちだったので、一戸建て目指して傭兵として自由に生きたい"},
+	normalize.NormalizeTitleForMatch("死亡遊戯で飯を食う。44：CLOUDY BEACH"):                    {"死亡遊戯で飯を食う。 44:CLOUDY BEACH"},
 }
 
 func punctuationAsSpaces(s string) string {

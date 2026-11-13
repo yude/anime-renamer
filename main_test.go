@@ -1350,11 +1350,11 @@ func TestProcessFileNoMeaningfulContentDoesNotContactAnnict(t *testing.T) {
 }
 
 func TestProcessFileAmbiguousEpisodeDoesNotContactAnnict(t *testing.T) {
-	testProcessFileSkippedWithoutAnnict(t, "作品 #01,02「第一話 ／ 第二話」.mp4", "cannot represent as one positive integer episode")
+	testProcessFileSkippedWithoutAnnict(t, "作品 #01,02「第一話 ／ 第二話」.mp4", "cannot represent as one supported episode")
 }
 
 func TestProcessFileEpisodeZeroDoesNotContactAnnict(t *testing.T) {
-	testProcessFileSkippedWithoutAnnict(t, "作品 第0話「前日譚」.mp4", "cannot represent as one positive integer episode")
+	testProcessFileSkippedWithoutAnnict(t, "作品 第0話「前日譚」.mp4", "cannot represent as one supported episode")
 }
 
 func testProcessFileSkippedWithoutAnnict(t *testing.T, baseName, wantReason string) {
