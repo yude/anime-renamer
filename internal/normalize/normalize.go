@@ -151,6 +151,12 @@ func NormalizeTitleForMatch(s string) string {
 	if key == "ヘルモードやり込み好きのゲーマーは廃設定の異世界で無双する2" {
 		return NormalizeTitleForMatch("ヘルモード ～やり込み好きのゲーマーは廃設定の異世界で無双する～ 2nd Season")
 	}
+	if key == "マウスカーソルで現実を操作できるようになったので女の子をいっぱいクリックします" {
+		return NormalizeTitleForMatch("マウスカーソルで現実を操作できるようになったので、女の子をいっぱいクリックしまーす")
+	}
+	if key == "目覚めたら最強装備と宇宙船持ちだったので一戸建て目指して傭兵として自由に生きた" || key == "目覚めたら最強装備と宇宙船持ちだったので一戸建て目指して傭兵として自由に生きたい" {
+		return NormalizeTitleForMatch("目覚めたら最強装備と宇宙船持ちだったので、一戸建て目指して傭兵として自由に生きたい")
+	}
 	return key
 }
 

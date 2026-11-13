@@ -25,6 +25,8 @@ func normalizePunctForSearch(s string) string {
 			b.WriteRune('！')
 		} else if r == '~' {
 			b.WriteRune('～')
+		} else if r == '&' {
+			b.WriteRune('＆')
 		} else {
 			b.WriteRune(r)
 		}
@@ -308,6 +310,9 @@ func searchTitleVariants(title string) []string {
 	add(compactSpacesAroundHyphens(title))
 	add(compactSpaceAfterJapaneseStop(title))
 	add(normalize.NormalizeKatakanaDashes(title))
+	// Annict search distinguishes the two middle-dot widths even though our
+	// final title comparison treats them as presentation differences.
+	add(strings.ReplaceAll(title, "・", "･"))
 	add(punctuationAsSpaces(title))
 	add(removeAllSpaces(title))
 	add(compactSeasonSpacing(normalizedTitle))
@@ -380,6 +385,8 @@ var titleSearchAliases = map[string][]string{
 	normalize.NormalizeTitleForMatch("SAO SELECTION 特別版"):                            {"ソードアート・オンライン"},
 	normalize.NormalizeTitleForMatch("領民0人スタートの辺境領主様"):                               {"領民０人スタートの辺境領主様"},
 	normalize.NormalizeTitleForMatch("ヘルモード ~やり込み好きのゲーマーは廃設定の異世界で無双する~2"):            {"ヘルモード ～やり込み好きのゲーマーは廃設定の異世界で無双する～ 2nd Season"},
+	normalize.NormalizeTitleForMatch("マウスカーソルで現実を操作できるようになったので女の子をいっぱいクリックします"):      {"マウスカーソルで現実を操作できるようになったので、女の子をいっぱいクリックしまーす"},
+	normalize.NormalizeTitleForMatch("目覚めたら最強装備と宇宙船持ちだったので一戸建て目指して傭兵として自由に生きたい"):     {"目覚めたら最強装備と宇宙船持ちだったので、一戸建て目指して傭兵として自由に生きたい"},
 }
 
 func punctuationAsSpaces(s string) string {

@@ -105,6 +105,14 @@ var (
 	genericAnimeEPGPrefixPattern   = regexp.MustCompile(`^(?:[\s\x{3000}]*\[(?:字|新|再|無|多|SS|解|終|デ|双|二)\])*[\s\x{3000}]*(?:TV|テレビ)?アニメ[\s\x{3000}]+`)
 	bareEPGNumberSubtitlePattern   = regexp.MustCompile(`^(.+\S)[\s\x{3000}]+([0-9０-９]{2})[\s\x{3000}]+(\S.*)$`)
 	seasonBareEPGNumberPattern     = regexp.MustCompile(`^(.+[~〜～][0-9０-９]+)[\s\x{3000}]+([0-9０-９]{2})$`)
+	// These labels are episode counters only in the named series. Keeping the
+	// complete work boundary avoids interpreting numbers inside other titles.
+	workEpisodePatterns = []*regexp.Regexp{
+		regexp.MustCompile(`(?i)^(メダリスト(?:[\s\x{3000}]+第[0-9０-９]+期)?)[\s\x{3000}]+(score[.．\s\x{3000}]*([0-9０-９]+))(.*)$`),
+		regexp.MustCompile(`^(夜桜さんちの大作戦(?:[\s\x{3000}]+第[0-9０-９]+(?:期|クール))*)[\s\x{3000}]+(作戦[\s\x{3000}]*([0-9０-９]+))(.*)$`),
+	}
+	workEpisodeContinuationPattern = regexp.MustCompile(`(?i)^[\s\x{3000}]*(?:[.．,，、/&＆／~〜～－―ー-][\s\x{3000}]*(?:(?:score|作戦|第|[#＃♯])[.．\s\x{3000}]*)?[0-9０-９]+|(?:score|作戦|第|[#＃♯])[.．\s\x{3000}]*[0-9０-９]+)`)
+	workEpisodeMarkerPattern       = regexp.MustCompile(`(?i)(?:score|作戦|ep[.．]?|[#＃♯])[.．\s\x{3000}]*[0-9０-９]+|第[\s\x{3000}]*[0-9０-９]+[\s\x{3000}]*話`)
 
 	// Metadata tag patterns to strip from filenames (SCRename rp1 equivalent).
 	metadataTagPatterns = []*regexp.Regexp{
@@ -373,7 +381,28 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 	epEnd := -1
 	episodeMarkerOpensSubtitle := false
 	positionalSubtitle := ""
-	if genericAnimeEPG {
+	for _, pattern := range workEpisodePatterns {
+		m := pattern.FindStringSubmatchIndex(name)
+		if m == nil {
+			continue
+		}
+		after := name[m[8]:m[9]]
+		if workEpisodeContinuationPattern.MatchString(after) || workEpisodeMarkerPattern.MatchString(after) {
+			return nil, fmt.Errorf("%w in %q", ErrAmbiguousEpisode, filename)
+		}
+		parsedNumber, err := decimalEpisodeNumber(name[m[6]:m[7]])
+		if err != nil {
+			return nil, fmt.Errorf("invalid episode number: %w", err)
+		}
+		episodeNumber = parsedNumber
+		epStart, epEnd = m[4], m[5]
+		tail := strings.TrimSpace(after)
+		if tail != "" && !strings.HasPrefix(tail, "「") && !strings.HasPrefix(tail, "『") {
+			positionalSubtitle = tail
+		}
+		break
+	}
+	if genericAnimeEPG && episodeNumber == 0 {
 		if m := bareEPGNumberSubtitlePattern.FindStringSubmatchIndex(name); m != nil && !startsWithEpisodeMetadata(name[m[6]:m[7]]) {
 			parsedNumber, err := decimalEpisodeNumber(name[m[4]:m[5]])
 			if err != nil {
@@ -543,6 +572,25 @@ func ParseFilename(filename string) (*RecordingMetadata, error) {
 	workTitle = normalize.TrimSpaces(workTitle)
 	workTitle = normalize.CollapseSpaces(workTitle)
 	subtitle = normalize.TrimSpaces(subtitle)
+	// 留〆 is this series' finale label, not a numeric episode. Removing it
+	// only with an explicit finale flag leaves the subtitle matcher responsible
+	// for proving the actual episode; no ordinal is guessed here.
+	if finalEpisode && episodeNumber == 0 && workTitle == "ワールド イズ ダンシング 留〆" {
+		workTitle = "ワールド イズ ダンシング"
+	}
+	if episodeNumber == 0 && subtitle == "" && !finalEpisode && !recordedDate.IsZero() {
+		// A selection's ordinal says nothing about its original episode. Only
+		// dated, numberless selections may enter ordinary strict date inference.
+		for _, suffix := range []string{"セレクション放送", "セレクション再放送"} {
+			if strings.HasSuffix(workTitle, suffix) {
+				base := unwrapEPGTitle(strings.TrimSpace(strings.TrimSuffix(workTitle, suffix)))
+				if base != "" {
+					workTitle = base
+				}
+				break
+			}
+		}
+	}
 
 	if workTitle == "" {
 		return nil, fmt.Errorf("could not extract work title from %q", filename)

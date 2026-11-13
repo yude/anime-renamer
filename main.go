@@ -794,6 +794,9 @@ func matchDateOnlyAcrossWorks(meta *parser.RecordingMetadata, works []annict.Wor
 		resolved = append(resolved, resolvedWork{work: work, episode: episode, reason: reason})
 	}
 	if len(unresolved) > 0 {
+		if result, err := matchSharedCourSchedule(meta, works, episodesByWork, c, client); err == nil {
+			return result, nil
+		}
 		return nil, fmt.Errorf("related work candidates remain unverified: %s", strings.Join(unresolved, "; "))
 	}
 	if len(resolved) != 1 {

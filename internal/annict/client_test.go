@@ -77,6 +77,11 @@ func TestSearchTitleVariants(t *testing.T) {
 		{input: "SAO SELECTION 特別版", want: "ソードアート・オンライン"},
 		{input: "領民0人スタートの辺境領主様", want: "領民０人スタートの辺境領主様"},
 		{input: "ヘルモード ~やり込み好きのゲーマーは廃設定の異世界で無双する~2", want: "ヘルモード ～やり込み好きのゲーマーは廃設定の異世界で無双する～ 2nd Season"},
+		{input: "ガールズ&パンツァー もっとらぶらぶ作戦です!", want: "ガールズ＆パンツァー もっとらぶらぶ作戦です！"},
+		{input: "真・侍伝 YAIBA", want: "真･侍伝 YAIBA"},
+		{input: "マウスカーソルで現実を操作できるようになったので女の子をいっぱいクリックします", want: "マウスカーソルで現実を操作できるようになったので、女の子をいっぱいクリックしまーす"},
+		{input: "目覚めたら最強装備と宇宙船持ちだったので一戸建て目指して傭兵として自由に生きた", want: "目覚めたら最強装備と宇宙船持ちだったので、一戸建て目指して傭兵として自由に生きたい"},
+		{input: "目覚めたら最強装備と宇宙船持ちだったので一戸建て目指して傭兵として自由に生きたい", want: "目覚めたら最強装備と宇宙船持ちだったので、一戸建て目指して傭兵として自由に生きたい"},
 	} {
 		if got := searchTitleVariants(tt.input); !slices.Contains(got, tt.want) {
 			t.Errorf("searchTitleVariants(%q) = %q, want variant %q", tt.input, got, tt.want)
