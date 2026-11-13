@@ -16,6 +16,7 @@ import (
 	"github.com/yude/anime-renamer/internal/annict"
 	"github.com/yude/anime-renamer/internal/cache"
 	"github.com/yude/anime-renamer/internal/dateinfer"
+	"github.com/yude/anime-renamer/internal/epgstation"
 	"github.com/yude/anime-renamer/internal/matcher"
 	"github.com/yude/anime-renamer/internal/normalize"
 	"github.com/yude/anime-renamer/internal/parser"
@@ -30,6 +31,7 @@ func main() {
 	noCache := flag.Bool("no-cache", false, "Disable caching")
 	confidenceThreshold := flag.Int("confidence", matcher.AutoRenameThreshold, "Minimum confidence for auto-rename")
 	outputDir := flag.String("output", "", "Output directory (default: same as input)")
+	epgstationURL := flag.String("epgstation-url", "", "EPGStation URL for recording-history recovery (or EPGSTATION_URL)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "anime-renamer - Annict-based recording file renamer\n\n")
@@ -43,6 +45,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  anime-renamer /recordings/\n\n")
 		fmt.Fprintf(os.Stderr, "Environment:\n")
 		fmt.Fprintf(os.Stderr, "  ANNICT_ACCESS_TOKEN    Annict API access token (required)\n")
+		fmt.Fprintf(os.Stderr, "  EPGSTATION_URL         Optional EPGStation URL for recording-history recovery\n")
 	}
 	flag.Parse()
 
@@ -67,6 +70,20 @@ func main() {
 	// Initialize components
 	annictClient := annict.NewClient(token)
 	syobocalClient := syobocal.NewClient()
+	if *epgstationURL == "" {
+		*epgstationURL = os.Getenv("EPGSTATION_URL")
+	}
+	if *epgstationURL == "" {
+		*epgstationURL = loadEnvFromDotenv(flag.Arg(0), "EPGSTATION_URL")
+	}
+	var epgClient epgstationRecordingClient
+	if *epgstationURL != "" {
+		client, err := epgstation.NewClient(*epgstationURL)
+		if err != nil {
+			log.Fatal(err)
+		}
+		epgClient = client
+	}
 
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -99,7 +116,7 @@ func main() {
 	episodesCache := make(map[int][]annict.Episode)
 	programsCache := make(map[programsCacheKey][]annict.Program)
 	plannedDestinations := make(map[string]string)
-	processing := &processingContext{syobocalClient: syobocalClient, batchSchedule: batchSchedule}
+	processing := &processingContext{syobocalClient: syobocalClient, batchSchedule: batchSchedule, epgstationClient: epgClient}
 
 	renamed := 0
 	previewed := 0
@@ -153,8 +170,10 @@ type syobocalProgramClient interface {
 }
 
 type processingContext struct {
-	syobocalClient syobocalProgramClient
-	batchSchedule  *batchScheduleContext
+	syobocalClient   syobocalProgramClient
+	batchSchedule    *batchScheduleContext
+	epgstationClient epgstationRecordingClient
+	syobocalChannels []syobocal.Channel
 }
 
 type channelAnchorState struct {
@@ -379,6 +398,14 @@ func processFile(
 				}
 			} else if relatedErr != nil {
 				err = fmt.Errorf("%v; search related works: %w", err, relatedErr)
+			}
+		}
+		if err != nil && runtime != nil && runtime.epgstationClient != nil {
+			if epgResult, epgErr := matchEPGStationRecording(baseName, meta, client, c, workCache, episodesCache, runtime); epgErr == nil {
+				result, err = epgResult, nil
+				fmt.Fprintf(os.Stderr, "  Fallback:  EPGStation recording history verified the source channel and broadcast time\n")
+			} else {
+				err = fmt.Errorf("%v; EPGStation: %w", err, epgErr)
 			}
 		}
 		if err != nil {
@@ -1250,13 +1277,17 @@ func validateConfidenceThreshold(value int) error {
 // loadTokenFromDotenv looks for .env in target's own directory (or target
 // itself, if it is a directory) and its parent directories.
 func loadTokenFromDotenv(target string) string {
+	return loadEnvFromDotenv(target, "ANNICT_ACCESS_TOKEN")
+}
+
+func loadEnvFromDotenv(target, key string) string {
 	dir := target
 	if info, err := os.Stat(target); err != nil || !info.IsDir() {
 		dir = filepath.Dir(target)
 	}
 
 	for {
-		if token, ok := readTokenFromEnvFile(filepath.Join(dir, ".env")); ok {
+		if token, ok := readEnvFromFile(filepath.Join(dir, ".env"), key); ok {
 			return token
 		}
 
@@ -1273,6 +1304,10 @@ func loadTokenFromDotenv(target string) string {
 
 // readTokenFromEnvFile reads ANNICT_ACCESS_TOKEN from a dotenv-style file.
 func readTokenFromEnvFile(path string) (string, bool) {
+	return readEnvFromFile(path, "ANNICT_ACCESS_TOKEN")
+}
+
+func readEnvFromFile(path, wantedKey string) (string, bool) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", false
@@ -1290,7 +1325,7 @@ func readTokenFromEnvFile(path string) (string, bool) {
 			continue
 		}
 		key = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(key), "export "))
-		if key != "ANNICT_ACCESS_TOKEN" {
+		if key != wantedKey {
 			continue
 		}
 		value = strings.TrimSpace(value)
