@@ -25,17 +25,22 @@ const BackupDirectory = ".anime-renamer-backups"
 var ErrCannotEmbed = errors.New("container cannot safely retain embedded metadata")
 
 type probe struct {
-	Streams []struct {
-		CodecType   string            `json:"codec_type"`
-		CodecName   string            `json:"codec_name"`
-		Disposition map[string]int    `json:"disposition"`
-		Tags        map[string]string `json:"tags"`
-	} `json:"streams"`
-	Format struct {
+	Streams []probeStream `json:"streams"`
+	Format  struct {
 		Name string            `json:"format_name"`
 		Tags map[string]string `json:"tags"`
 	} `json:"format"`
-	Chapters []json.RawMessage `json:"chapters"`
+	Chapters []probeChapter `json:"chapters"`
+}
+
+type probeStream struct {
+	Index       int               `json:"index"`
+	ID          string            `json:"id"`
+	CodecType   string            `json:"codec_type"`
+	CodecName   string            `json:"codec_name"`
+	CodecTag    string            `json:"codec_tag_string"`
+	Disposition map[string]int    `json:"disposition"`
+	Tags        map[string]string `json:"tags"`
 }
 
 // limitedBuffer bounds diagnostic output from external programs.
@@ -60,11 +65,16 @@ func run(program string, args ...string) ([]byte, error) {
 	return stdout.Bytes(), nil
 }
 
-func packetHash(path string) ([]byte, error) {
+func packetHash(path string, streams []probeStream) ([]byte, error) {
 	// Framehash records each copied packet's timestamp, duration, size and
 	// encoded payload hash. Hash the textual output as a stream to bound memory
 	// use for multi-gigabyte recordings. No decoding or transcoding takes place.
-	cmd := exec.Command("ffmpeg", "-nostdin", "-v", "error", "-copyts", "-i", path, "-map", "0", "-c", "copy", "-avoid_negative_ts", "disabled", "-f", "framehash", "-hash", "sha256", "-")
+	args := []string{"-nostdin", "-v", "error", "-copyts", "-i", path}
+	for _, stream := range streams {
+		args = append(args, "-map", fmt.Sprintf("0:%d", stream.Index))
+	}
+	args = append(args, "-c", "copy", "-avoid_negative_ts", "disabled", "-f", "framehash", "-hash", "sha256", "-")
+	cmd := exec.Command("ffmpeg", args...)
 	digest := sha256.New()
 	var stderr limitedBuffer
 	cmd.Stdout, cmd.Stderr = digest, &stderr
@@ -243,8 +253,9 @@ func Embed(path string, info Info, dryRun bool) (Result, error) {
 	if !tagsMatch(updated, tags) {
 		return result, fmt.Errorf("%w: remux did not retain the requested metadata", ErrCannotEmbed)
 	}
-	if len(original.Streams) == 0 || len(original.Streams) != len(updated.Streams) {
-		return result, fmt.Errorf("%w: remux changed streams", ErrCannotEmbed)
+	addedChapterTrack, err := verifyStreamLayout(original, updated, tempPath, format == "mov")
+	if err != nil {
+		return result, fmt.Errorf("%w: %v", ErrCannotEmbed, err)
 	}
 	if !retainedTags(original.Format.Tags, updated.Format.Tags, tags) {
 		return result, fmt.Errorf("%w: remux lost existing metadata", ErrCannotEmbed)
@@ -255,17 +266,22 @@ func Embed(path string, info Info, dryRun bool) (Result, error) {
 			return result, fmt.Errorf("%w: remux changed stream %d or its metadata", ErrCannotEmbed, index)
 		}
 	}
-	if !slices.EqualFunc(original.Chapters, updated.Chapters, func(a, b json.RawMessage) bool { return bytes.Equal(a, b) }) {
+	if !chaptersEqual(original.Chapters, updated.Chapters, addedChapterTrack) {
 		return result, fmt.Errorf("%w: remux changed chapters", ErrCannotEmbed)
 	}
 	var originalHash []byte
-	for _, candidate := range []string{path, tempPath} {
+	for _, candidate := range []struct {
+		path    string
+		streams []probeStream
+	}{{path, original.Streams}, {tempPath, updated.Streams[:len(original.Streams)]}} {
 		// Unsupported streams fail safely, retaining the original source.
-		hash, err := packetHash(candidate)
+		// A newly synthesized chapter track is checked by its MP4 references
+		// and chapter contents; every original stream still gets hashed.
+		hash, err := packetHash(candidate.path, candidate.streams)
 		if err != nil {
 			return result, fmt.Errorf("%w: %v", ErrCannotEmbed, err)
 		}
-		if candidate == path {
+		if candidate.path == path {
 			originalHash = hash
 		} else if !bytes.Equal(originalHash, hash) {
 			return result, fmt.Errorf("%w: remux changed packet payloads, headers or timing", ErrCannotEmbed)

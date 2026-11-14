@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -48,24 +49,36 @@ func processMatchedMetadata(file string, match *matcher.MatchResult, dryRun bool
 	if err != nil || !source.Mode().IsRegular() {
 		return &renamer.RenameResult{OriginalPath: file, Error: fmt.Errorf("metadata source is not a regular file: %s", file)}
 	}
-	// Existing sidecars would be orphaned by a move, or override new embedded
-	// tags in Jellyfin. Preserve them and request an explicit review instead.
+	plannedPath := file
+	if !options.only {
+		preview := renamer.RenameWithReservations(file, match, true, outputDir, plans)
+		if preview.Error != nil {
+			return preview
+		}
+		plannedPath = preview.NewPath
+	}
+	// A failed earlier embed may have produced exactly this NFO. It can stay
+	// beside an unchanged video while embedding the same verified metadata.
+	// Manual/different NFOs and moves that would orphan sidecars remain blocked.
 	if _, err := os.Lstat(metadata.SidecarPath(file)); err == nil {
-		if !options.only || backend == "embedded" {
+		matching := false
+		if backend == "embedded" && filepath.Clean(plannedPath) == filepath.Clean(file) {
+			matching = matchesGeneratedNFO(metadata.SidecarPath(file), info)
+		}
+		if (!options.only || backend == "embedded") && !matching {
 			return &renamer.RenameResult{OriginalPath: file, SkipReason: "existing NFO must be reviewed before renaming or embedding; it takes precedence in Jellyfin"}
+		}
+		if matching {
+			fmt.Fprintf(os.Stderr, "  NFO:       preserving matching metadata while retrying embedded tags\n")
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return &renamer.RenameResult{OriginalPath: file, Error: err}
 	}
 	r := &renamer.RenameResult{OriginalPath: file, NewPath: file, Confidence: match.Confidence}
 	if !options.only {
-		preview := renamer.RenameWithReservations(file, match, true, outputDir, plans)
-		if preview.Error != nil {
-			return preview
-		}
-		if _, err := os.Lstat(metadata.SidecarPath(preview.NewPath)); err == nil {
+		if _, err := os.Lstat(metadata.SidecarPath(plannedPath)); err == nil && filepath.Clean(plannedPath) != filepath.Clean(file) {
 			return &renamer.RenameResult{OriginalPath: file, SkipReason: "destination already has an NFO; review it before moving a recording beside it"}
-		} else if !errors.Is(err, os.ErrNotExist) {
+		} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return &renamer.RenameResult{OriginalPath: file, Error: err}
 		}
 		r = renameMatchedRecording(file, match, dryRun, outputDir, plans)
@@ -127,4 +140,17 @@ func processMatchedMetadata(file string, match *matcher.MatchResult, dryRun bool
 		}
 	}
 	return r
+}
+
+func matchesGeneratedNFO(path string, info metadata.Info) bool {
+	stat, err := os.Lstat(path)
+	if err != nil || !stat.Mode().IsRegular() {
+		return false
+	}
+	expected, err := info.VideoNFO()
+	if err != nil || stat.Size() != int64(len(expected)) {
+		return false
+	}
+	data, err := os.ReadFile(path)
+	return err == nil && bytes.Equal(data, expected)
 }

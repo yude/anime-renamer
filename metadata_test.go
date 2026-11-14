@@ -177,3 +177,43 @@ func TestExistingNFOPreventsOrphanedMetadataOnRename(t *testing.T) {
 		t.Fatal("video moved away from its original sidecar")
 	}
 }
+
+func TestEmbeddedRetryKeepsMatchingGeneratedNFO(t *testing.T) {
+	for _, tool := range []string{"ffmpeg", "ffprobe"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skip(err)
+		}
+	}
+	dir := filepath.Join(t.TempDir(), "作品")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(dir, "作品 #1 「はじまり」.mp4")
+	cmd := exec.Command("ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=64x64:r=2", "-t", "1", "-c:v", "mpeg4", file)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("create fixture: %v: %s", err, output)
+	}
+	number := 1.0
+	match := &matcher.MatchResult{Work: &annict.Work{ID: 12, Title: "作品"}, Episode: &annict.Episode{ID: 34, Number: &number, Title: "はじまり"}, Confidence: 90}
+	info, _ := metadata.FromMatch(match, 1)
+	nfo, _ := info.VideoNFO()
+	if err := os.WriteFile(metadata.SidecarPath(file), nfo, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, only := range []bool{true, false} {
+		r := processMatchedMetadata(file, match, false, "", make(map[string]string), &metadataOptions{mode: "auto", only: only, season: 1})
+		if r.Error != nil || r.SkipReason != "" || (only && r.MetadataWritten != 1) || (!only && r.MetadataUnchanged != 1) {
+			t.Fatalf("retry (metadata-only=%v): %+v", only, r)
+		}
+	}
+	if data, _ := os.ReadFile(metadata.SidecarPath(file)); !bytes.Equal(data, nfo) {
+		t.Fatal("retry changed the existing NFO")
+	}
+	if err := os.WriteFile(metadata.SidecarPath(file), []byte("manual metadata"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := processMatchedMetadata(file, match, false, "", nil, &metadataOptions{mode: "embedded", only: true, season: 1})
+	if r.Error != nil || r.SkipReason == "" {
+		t.Fatalf("manual NFO must still require review: %+v", r)
+	}
+}
