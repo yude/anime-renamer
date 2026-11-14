@@ -244,6 +244,11 @@ func EmbedWithOptions(path string, info Info, dryRun bool, options EmbedOptions)
 	if err != nil {
 		return result, err
 	}
+	if format == "mov" {
+		if err := restoreHEVCConfigs(path, tempPath, original, updated); err != nil {
+			return result, err
+		}
+	}
 	if err := verifyEmbeddedFiles(ctx, path, tempPath, original, updated, tags, format == "mov"); err != nil {
 		return result, err
 	}

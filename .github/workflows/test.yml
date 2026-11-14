@@ -41,3 +41,27 @@ jobs:
 
       - name: Build
         run: go build ./...
+
+  ffmpeg7:
+    runs-on: ubuntu-latest
+    container: debian:13-slim
+    steps:
+      - name: Install build and media tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git gcc libc6-dev ffmpeg
+
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Record media tool version
+        run: ffmpeg -version
+
+      - name: Test with FFmpeg 7 and race detector
+        run: go test -race ./...
