@@ -13,6 +13,8 @@
 - 話数を特定できない特番・複数話結合・第0話は理由を表示して安全にスキップ
 - 検索結果をローカルにキャッシュしてAPI呼び出しを削減
 - `--dry-run` でリネーム内容を実行前に確認可能
+- Annictとの照合結果を動画へ埋め込み、またはJellyfin用NFOとして保存（任意）
+- `--metadata-only` でリネーム済みの動画へメタデータだけを後付け
 
 ## インストール
 
@@ -79,8 +81,46 @@ anime-renamer /recordings/
 | `--output` | 出力先ディレクトリ(省略時は入力ファイルと同じ場所) |
 | `--epgstation-url` | 日付のみの録画を補完するEPGStationのURL。環境変数または `.env` の `EPGSTATION_URL` でも設定可能 |
 | `--ts-metadata` | `.ts` / `.m2ts` 内の放送番組情報を照合に使う。既定で有効。`--ts-metadata=false` で無効化 |
+| `--metadata` | `none`（既定）、`auto`、`embedded`、`nfo`。`auto` はMP4/M4V/MKVに埋め込み、TS/M2TSはNFOを生成 |
+| `--metadata-only` | 動画名と配置を維持してメタデータだけを追加。`--metadata` 省略時は `auto`。`--output` との併用不可 |
+| `--metadata-season` | Annict作品ごとのローカルなシーズン番号（既定 `1`）。作品名の「第2期」などから推測しない |
 
 対応する拡張子は `.mp4` `.ts` `.m2ts` `.mkv` `.m4v` です。
+
+### Jellyfin用のメタデータ
+
+動画へ埋め込める形式を優先する場合は `--metadata auto` を指定します。従来のコマンドは既定でメタデータを書き込まないため、動画そのものを変更する処理は明示的に選べます。
+
+```sh
+# 新しい録画: リネームとメタデータ付与をプレビュー
+anime-renamer --metadata auto --dry-run --recursive /mnt/prod/recorded
+
+# 実行: 作品ごとのディレクトリへリネームし、メタデータを付与
+anime-renamer --metadata auto --recursive /mnt/prod/recorded
+
+# 既にリネーム済みの動画: 名前と配置を変えず、メタデータだけを追加
+anime-renamer --metadata-only --dry-run --recursive /path/to/organized
+anime-renamer --metadata-only --recursive /path/to/organized
+
+# 動画のバイト列を変更せず、全形式でNFOを使う場合
+anime-renamer --metadata-only --metadata nfo --recursive /path/to/organized
+```
+
+作品名・サブタイトル・明示話数・Annict IDを保存します。書き込みには通常の厳密な照合に加えて信頼度90以上と、Annict上の正の整数話数・エピソードIDを要求します。`--confidence` を下げてもメタデータの条件は緩めません。小数話や番号未確認の特番は、Jellyfin用の整数に丸めたり独自番号を割り当てたりせずスキップします。再放送を含む録画日を、そのエピソードの初回放送日として保存することはありません。
+
+**動画への埋め込み:** MP4/M4V/MKVで `ffmpeg` と `ffprobe` が必要です。`title`、`show` / `show_name`、`season_number`、`episode_sort` を保存し、標準のコメント欄にAnnictのURLを追記します。既存の他のメタデータを引き継ぎ、映像・音声・字幕などは `-c copy` でコピーします。再エンコードはしません。同じディレクトリの一時ファイルへリマックスし、ストリーム構成、チャプター、エンコード済みパケットの内容・ヘッダー・時刻を検証してから置き換えます。
+
+元の動画は、動画の隣の `.anime-renamer-backups/<ファイル名のSHA256>.original` に保存します。対応するパスは各ファイルの `Backup:` 行に表示します。バックアップは自動削除・上書きしません。復元するときは、処理や再生を停止したうえで、表示されたバックアップを元の動画パスへコピーしてください。同じメタデータでの再実行は何も変更しません。後から異なるメタデータを書き直す場合は、既存のバックアップを退避・復元してから実行します。埋め込みには動画全体の読み書きと検証、および元動画を保持するための空き容量が必要です。dry-runは読み取りによる事前確認までを行い、実際のリマックス・パケット検証は書き込み時に行います。
+
+**NFOとフォールバック:** TS/M2TSへは同じ形式のエピソードタグを保存できないため、動画と同じベース名の `.nfo` を生成します。`auto` では埋め込み時にストリーム・字幕ヘッダー・チャプターなどを維持できないと判定した場合も、動画を保持してNFOに切り替えます。`embedded` を明示した場合はNFOへ切り替えず失敗を報告します。全てNFOに統一したい場合は `--metadata nfo` を使います。
+
+既存のNFOは内容を変えません。NFOのある動画への埋め込みやリネームは、手動確認が必要なものとしてスキップします（NFOがJellyfinで優先されるためです）。NFOだけを後付けするモードでは、既存NFOを保持して不足分だけを作成します。`tvshow.nfo` は作品ごとに整理されたフォルダにだけ生成し、複数作品が混在する入力ディレクトリには作成しません。
+
+**シーズンとJellyfinへの反映:** 現在の出力構成に合わせ、Annictの各作品をそれぞれ独立した作品フォルダ・ローカルのシーズン1として扱います。Annictの「第2期」を別データベースのシーズン2へ自動換算しません。既存の構成に合わせる必要がある場合は、作品単位で `--metadata-season 2` などを指定してください。これだけで異なるAnnict作品のフォルダを1作品へ統合することはありません。
+
+Jellyfinでは対象ライブラリの「埋め込みタイトルを優先」「埋め込みエピソード情報を優先」を有効にし、対象作品のメタデータを更新してください。既に付いている誤った話数は、埋め込み情報を優先して再取得する必要があります。動画の更新日時は保持するため、通常のファイル監視による自動反映には依存しません。NFOも対象作品のメタデータ更新で読み込ませます。CLIからJellyfinの設定変更やライブラリ全体のスキャンは実行しません。
+
+形式は [JellyfinのNFO仕様](https://jellyfin.org/docs/general/server/metadata/nfo/) と [Jellyfin 10.11.7の埋め込みタグ読み取り](https://github.com/jellyfin/jellyfin/blob/v10.11.7/MediaBrowser.MediaEncoding/Probing/ProbeResultNormalizer.cs) に合わせています。あらすじ・画像・キャストの追加取得や、Annictにない情報の補完は行いません。
 
 ### リネーム後のファイル名
 

@@ -85,6 +85,11 @@ type RenameResult struct {
 	Previewed    bool
 	SkipReason   string
 	Error        error
+
+	MetadataWritten   int
+	MetadataPreviewed int
+	MetadataUnchanged int
+	MetadataPreserved int
 }
 
 // BuildPath generates the destination path from a match result.

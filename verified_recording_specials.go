@@ -121,5 +121,5 @@ func processStandaloneRecording(file string, meta *parser.RecordingMetadata, cli
 	for _, reason := range result.Reasons {
 		fmt.Fprintf(os.Stderr, "    - %s\n", reason)
 	}
-	return renameMatchedRecording(file, result, dryRun, outputDir, plans)
+	return renameMatchedRecording(file, result, dryRun, outputDir, plans, runtime)
 }

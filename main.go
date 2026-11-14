@@ -18,6 +18,7 @@ import (
 	"github.com/yude/anime-renamer/internal/dateinfer"
 	"github.com/yude/anime-renamer/internal/epgstation"
 	"github.com/yude/anime-renamer/internal/matcher"
+	"github.com/yude/anime-renamer/internal/metadata"
 	"github.com/yude/anime-renamer/internal/normalize"
 	"github.com/yude/anime-renamer/internal/parser"
 	"github.com/yude/anime-renamer/internal/renamer"
@@ -34,6 +35,9 @@ func main() {
 	outputDir := flag.String("output", "", "Output directory (default: same as input)")
 	epgstationURL := flag.String("epgstation-url", "", "EPGStation URL for recording-history recovery (or EPGSTATION_URL)")
 	tsMetadata := flag.Bool("ts-metadata", true, "Use verified embedded broadcast metadata in .ts/.m2ts recordings")
+	metadataMode := flag.String("metadata", "none", "Metadata output: none, auto (embed MP4/MKV, NFO for TS), embedded, or nfo")
+	metadataOnly := flag.Bool("metadata-only", false, "Add metadata without renaming or moving videos (defaults to --metadata auto)")
+	metadataSeason := flag.Int("metadata-season", 1, "Local season number for each independent Annict work; no season is inferred from its title")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "anime-renamer - Annict-based recording file renamer\n\n")
@@ -57,6 +61,13 @@ func main() {
 		os.Exit(1)
 	}
 	if err := validateConfidenceThreshold(*confidenceThreshold); err != nil {
+		log.Fatal(err)
+	}
+	if *metadataOnly && *metadataMode == "none" {
+		*metadataMode = "auto"
+	}
+	metadataConfig := &metadataOptions{mode: *metadataMode, only: *metadataOnly, season: *metadataSeason}
+	if err := metadataConfig.validate(*outputDir); err != nil {
 		log.Fatal(err)
 	}
 
@@ -119,6 +130,9 @@ func main() {
 	programsCache := make(map[programsCacheKey][]annict.Program)
 	plannedDestinations := make(map[string]string)
 	processing := &processingContext{syobocalClient: syobocalClient, batchSchedule: batchSchedule, epgstationClient: epgClient}
+	if *metadataMode != "none" {
+		processing.metadata = metadataConfig
+	}
 	if *tsMetadata {
 		processing.tsMetadataReader = tsmeta.ReadFile
 	}
@@ -127,9 +141,19 @@ func main() {
 	previewed := 0
 	skipped := 0
 	failed := 0
+	metadataWritten, metadataPreviewed, metadataUnchanged, metadataPreserved := 0, 0, 0, 0
 
 	for _, file := range files {
 		result := processFile(file, annictClient, c, workCache, episodesCache, programsCache, plannedDestinations, *dryRun, *verbose, *confidenceThreshold, *outputDir, processing)
+		metadataWritten += result.MetadataWritten
+		metadataPreviewed += result.MetadataPreviewed
+		metadataUnchanged += result.MetadataUnchanged
+		metadataPreserved += result.MetadataPreserved
+		if result.Renamed {
+			renamed++
+		} else if result.Previewed {
+			previewed++
+		}
 
 		switch {
 		case result.Error != nil:
@@ -139,9 +163,9 @@ func main() {
 			fmt.Fprintf(os.Stderr, "  SKIP: %s\n\n", result.SkipReason)
 			skipped++
 		case result.Renamed:
-			renamed++
 		case result.Previewed:
-			previewed++
+		case result.MetadataWritten+result.MetadataPreviewed+result.MetadataUnchanged+result.MetadataPreserved > 0:
+			// Metadata-only successes do not count as renamed recordings.
 		default:
 			skipped++
 		}
@@ -150,7 +174,7 @@ func main() {
 	// Summary
 	fmt.Fprintf(os.Stderr, "\n--- Summary ---\n")
 	if *dryRun {
-		fmt.Fprintf(os.Stderr, "Dry-run mode: no files were renamed\n")
+		fmt.Fprintf(os.Stderr, "Dry-run mode: no recordings or metadata files were changed\n")
 		fmt.Fprintf(os.Stderr, "Would rename: %d\n", previewed)
 		fmt.Fprintf(os.Stderr, "Already organized: %d\n", renamed)
 	} else {
@@ -158,6 +182,9 @@ func main() {
 	}
 	fmt.Fprintf(os.Stderr, "Skipped: %d\n", skipped)
 	fmt.Fprintf(os.Stderr, "Failed:  %d\n", failed)
+	if *metadataMode != "none" {
+		fmt.Fprintf(os.Stderr, "Metadata: written=%d would-write=%d unchanged=%d preserved-existing=%d\n", metadataWritten, metadataPreviewed, metadataUnchanged, metadataPreserved)
+	}
 	if code := exitCodeForFailures(failed); code != 0 {
 		os.Exit(code)
 	}
@@ -180,6 +207,7 @@ type processingContext struct {
 	epgstationClient epgstationRecordingClient
 	syobocalChannels []syobocal.Channel
 	tsMetadataReader func(string) (*tsmeta.Broadcast, error)
+	metadata         *metadataOptions
 }
 
 type channelAnchorState struct {
@@ -663,10 +691,13 @@ func processFile(
 	// Step 7: Rename (or preview in dry-run mode). Existing filesystem entries
 	// and earlier batch reservations are preserved under duplicate/ with a
 	// one-based suffix instead of being overwritten or dropped.
-	return renameMatchedRecording(file, result, dryRun, outputDir, plannedDestinations)
+	return renameMatchedRecording(file, result, dryRun, outputDir, plannedDestinations, runtime)
 }
 
-func renameMatchedRecording(file string, result *matcher.MatchResult, dryRun bool, outputDir string, plannedDestinations map[string]string) *renamer.RenameResult {
+func renameMatchedRecording(file string, result *matcher.MatchResult, dryRun bool, outputDir string, plannedDestinations map[string]string, contexts ...*processingContext) *renamer.RenameResult {
+	if len(contexts) > 0 && contexts[0] != nil && contexts[0].metadata != nil {
+		return processMatchedMetadata(file, result, dryRun, outputDir, plannedDestinations, contexts[0].metadata)
+	}
 	result2 := renamer.RenameWithReservations(file, result, dryRun, outputDir, plannedDestinations)
 	if result2.Error != nil {
 		return result2
@@ -1284,6 +1315,9 @@ func collectFilesWithWalker(target string, recursive bool, walk walkDirFunc) ([]
 				return err
 			}
 			if d.IsDir() {
+				if d.Name() == metadata.BackupDirectory {
+					return filepath.SkipDir
+				}
 				return nil
 			}
 			return appendRecording(path, d)
