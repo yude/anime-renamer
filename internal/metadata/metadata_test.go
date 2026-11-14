@@ -47,6 +47,16 @@ func TestMetadataRejectsFractionalEpisodeWithoutRounding(t *testing.T) {
 	}
 }
 
+func TestMetadataDoesNotUseSortOrderAsEpisodeNumber(t *testing.T) {
+	match := verifiedMatch()
+	match.Episode.Number = nil
+	match.Episode.NumberText = ""
+	match.Episode.SortNumber = 100
+	if _, err := FromMatch(match, 1); err == nil {
+		t.Fatal("used Annict sort order as a public episode number")
+	}
+}
+
 func TestNFOMissingOnlyAndDryRun(t *testing.T) {
 	dir := t.TempDir()
 	video := filepath.Join(dir, "作品 #13.mp4")
@@ -89,5 +99,37 @@ func TestNFORejectsSymlink(t *testing.T) {
 	info, _ := FromMatch(verifiedMatch(), 1)
 	if _, err := WriteNFO(video, "", info, false); err == nil {
 		t.Fatal("must not follow NFO symlinks")
+	}
+}
+
+func TestBatchNFOPreviewsSharedShowOnlyOnce(t *testing.T) {
+	dir := t.TempDir()
+	info, _ := FromMatch(verifiedMatch(), 1)
+	plans := make(map[string][]byte)
+	first, err := WriteNFO(filepath.Join(dir, "first.mp4"), dir, info, true, plans)
+	if err != nil || first[1].Status != Previewed {
+		t.Fatalf("first: %+v, %v", first, err)
+	}
+	second, err := WriteNFO(filepath.Join(dir, "second.mp4"), dir, info, true, plans)
+	if err != nil || second[0].Status != Previewed || second[1].Status != Unchanged {
+		t.Fatalf("duplicate show preview: %+v, %v", second, err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Fatal("preview wrote files")
+	}
+}
+
+func TestShowIdentityConflictDoesNotWriteEpisode(t *testing.T) {
+	dir := t.TempDir()
+	video := filepath.Join(dir, "episode.mp4")
+	if err := os.WriteFile(filepath.Join(dir, "tvshow.nfo"), []byte(`<tvshow><uniqueid type="annict">999</uniqueid></tvshow>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	info, _ := FromMatch(verifiedMatch(), 1)
+	if _, err := WriteNFO(video, dir, info, false); err == nil {
+		t.Fatal("attached episode to conflicting work identity")
+	}
+	if _, err := os.Stat(SidecarPath(video)); !os.IsNotExist(err) {
+		t.Fatal("wrote episode before checking show identity")
 	}
 }

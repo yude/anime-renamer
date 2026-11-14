@@ -828,6 +828,8 @@ func findMatchingEpisode(number int, subtitle string, episodes []annict.Episode)
 	labelAmbiguous := false
 	labelAndSubtitleAmbiguous := false
 	var numberMatch *annict.Episode
+	numberAmbiguous := false
+	numberAndSubtitleAmbiguous := false
 	var numberAndSubtitleMatch *annict.Episode
 	var specialSortAndSubtitleMatch *annict.Episode
 	specialSortAndSubtitleAmbiguous := false
@@ -864,10 +866,14 @@ func findMatchingEpisode(number int, subtitle string, episodes []annict.Episode)
 		if episodeNumberMatches(e, number) {
 			if numberMatch == nil {
 				numberMatch = e
+			} else {
+				numberAmbiguous = true
 			}
 			if subtitle != "" && e.Title != "" && subtitlesEquivalent(e.Title, subtitle) {
 				if numberAndSubtitleMatch == nil {
 					numberAndSubtitleMatch = e
+				} else {
+					numberAndSubtitleAmbiguous = true
 				}
 			}
 		}
@@ -892,11 +898,17 @@ func findMatchingEpisode(number int, subtitle string, episodes []annict.Episode)
 	if zeroMatch != nil && !zeroAmbiguous {
 		return zeroMatch
 	}
+	if zeroAmbiguous || labelAndSubtitleAmbiguous {
+		return nil
+	}
 	if labelAndSubtitleMatch != nil && !labelAndSubtitleAmbiguous {
 		return labelAndSubtitleMatch
 	}
+	if numberAndSubtitleAmbiguous {
+		return nil
+	}
 	// Prefer exact number+subtitle match
-	if numberAndSubtitleMatch != nil {
+	if numberAndSubtitleMatch != nil && !numberAndSubtitleAmbiguous {
 		return numberAndSubtitleMatch
 	}
 	if specialSortAndSubtitleMatch != nil && !specialSortAndSubtitleAmbiguous {
@@ -912,9 +924,15 @@ func findMatchingEpisode(number int, subtitle string, episodes []annict.Episode)
 	if labelMatch != nil && !labelAmbiguous {
 		return labelMatch
 	}
+	if labelAmbiguous {
+		return nil
+	}
 	// Fall back to number-only match.
-	if numberMatch != nil {
+	if numberMatch != nil && !numberAmbiguous {
 		return numberMatch
+	}
+	if numberAmbiguous || numberAndSubtitleAmbiguous || labelAmbiguous || labelAndSubtitleAmbiguous || zeroAmbiguous {
+		return nil
 	}
 	// Some explicitly titled later seasons restart their EPG numbering at 1
 	// while Annict retains continuous series numbers. Only map by ordinal when

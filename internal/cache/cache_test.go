@@ -13,6 +13,20 @@ import (
 	"github.com/yude/anime-renamer/internal/syobocal"
 )
 
+func TestDisabledCacheClearDoesNotDeleteExistingData(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "keep.json")
+	if err := os.WriteFile(file, []byte("existing cache"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := NewDisabled(dir).Clear(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(file); err != nil {
+		t.Fatal("disabled cache deleted existing data")
+	}
+}
+
 func TestWorkRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	c := New(dir)

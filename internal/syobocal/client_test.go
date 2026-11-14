@@ -1,6 +1,8 @@
 package syobocal
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +10,19 @@ import (
 	"testing"
 	"time"
 )
+
+func TestRetryDelaysAreBoundedAndCancellable(t *testing.T) {
+	for _, value := range []string{"9223372036854775807", "Fri, 31 Dec 9999 23:59:59 GMT"} {
+		if delay := retryAfterDelay(value, time.Now()); delay <= 0 || delay > maxRetryDelay {
+			t.Fatalf("unbounded Retry-After: %s -> %v", value, delay)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := NewClient().WithContext(ctx).pause(time.Hour); !errors.Is(err, context.Canceled) {
+		t.Fatalf("uncancellable backoff: %v", err)
+	}
+}
 
 func TestGetPrograms(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

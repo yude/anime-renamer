@@ -3,6 +3,7 @@
 package syobocal
 
 import (
+	"context"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -20,6 +21,7 @@ const (
 	minimumRequestGap    = time.Second
 	maxRequestAttempts   = 3
 	default429Delay      = 10 * time.Second
+	maxRetryDelay        = 30 * time.Second
 )
 
 var jst = time.FixedZone("JST", 9*60*60)
@@ -60,6 +62,7 @@ type lookupResponse struct {
 
 // Client is a rate-limited Shoboi Calendar client.
 type Client struct {
+	ctx        context.Context
 	baseURL    string
 	httpClient *http.Client
 
@@ -120,7 +123,7 @@ func (c *Client) GetPrograms(tid int, date time.Time) ([]Program, error) {
 	var body []byte
 	for attempt := 1; attempt <= maxRequestAttempts; attempt++ {
 		c.waitForRateLimit()
-		req, err := http.NewRequest(http.MethodGet, u.String(), nil)
+		req, err := http.NewRequestWithContext(c.requestContext(), http.MethodGet, u.String(), nil)
 		if err != nil {
 			return nil, fmt.Errorf("create ProgLookup request: %w", err)
 		}
@@ -141,7 +144,9 @@ func (c *Client) GetPrograms(tid int, date time.Time) ([]Program, error) {
 						delay = default429Delay
 					}
 				}
-				c.sleep(delay)
+				if err := c.pause(delay); err != nil {
+					return nil, err
+				}
 				continue
 			}
 			return nil, fmt.Errorf("ProgLookup returned HTTP %d", resp.StatusCode)
@@ -202,11 +207,14 @@ func (c *Client) GetPrograms(tid int, date time.Time) ([]Program, error) {
 
 func retryAfterDelay(value string, now time.Time) time.Duration {
 	if seconds, err := strconv.Atoi(value); err == nil && seconds > 0 {
+		if seconds >= int(maxRetryDelay/time.Second) {
+			return maxRetryDelay
+		}
 		return time.Duration(seconds) * time.Second
 	}
 	if deadline, err := http.ParseTime(value); err == nil {
 		if delay := deadline.Sub(now); delay > 0 {
-			return delay
+			return min(delay, maxRetryDelay)
 		}
 	}
 	return 0
@@ -218,8 +226,31 @@ func (c *Client) waitForRateLimit() {
 
 	now := c.now()
 	if wait := c.requestGap - now.Sub(c.lastRequest); wait > 0 {
-		c.sleep(wait)
+		_ = c.pause(wait)
 		now = c.now()
 	}
 	c.lastRequest = now
+}
+
+func (c *Client) WithContext(ctx context.Context) *Client { c.ctx = ctx; return c }
+func (c *Client) requestContext() context.Context {
+	if c.ctx != nil {
+		return c.ctx
+	}
+	return context.Background()
+}
+
+func (c *Client) pause(delay time.Duration) error {
+	if c.ctx == nil {
+		c.sleep(delay)
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }

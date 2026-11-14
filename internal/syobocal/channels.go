@@ -24,7 +24,7 @@ func (c *Client) GetChannels() ([]Channel, error) {
 	q.Set("Command", "ChLookup")
 	u.RawQuery = q.Encode()
 	c.waitForRateLimit()
-	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
+	req, err := http.NewRequestWithContext(c.requestContext(), http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, err
 	}

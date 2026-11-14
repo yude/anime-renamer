@@ -122,7 +122,7 @@ func matchEPGStationRecording(filename string, meta *parser.RecordingMetadata, c
 		GetChannels() ([]syobocal.Channel, error)
 	})
 	if !ok {
-		return nil, fmt.Errorf("Syobocal channel catalogue is unavailable")
+		return nil, fmt.Errorf("syobocal channel catalogue is unavailable")
 	}
 	if runtime.syobocalChannels == nil {
 		runtime.syobocalChannels, err = channelClient.GetChannels()
@@ -178,7 +178,7 @@ func matchEPGStationRecording(filename string, meta *parser.RecordingMetadata, c
 		return nil, fmt.Errorf("recorded broadcast could not identify an episode: %s", reason)
 	}
 	if strings.TrimSpace(episode.Title) == "" {
-		return nil, fmt.Errorf("Annict has no subtitle to corroborate the recorded broadcast")
+		return nil, fmt.Errorf("annict has no subtitle to corroborate the recorded broadcast")
 	}
 	reasons := []string{fmt.Sprintf("EPGStation recording %d exactly matched the source filename; channel %q and start/end times matched the schedule", record.ID, channel.Name), reason}
 	if len(clean) == 0 {

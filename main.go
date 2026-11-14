@@ -2,15 +2,18 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/yude/anime-renamer/internal/annict"
@@ -37,6 +40,8 @@ func main() {
 	tsMetadata := flag.Bool("ts-metadata", true, "Use verified embedded broadcast metadata in .ts/.m2ts recordings")
 	metadataMode := flag.String("metadata", "none", "Metadata output: none, auto (embed MP4/MKV, NFO for TS), embedded, or nfo")
 	metadataOnly := flag.Bool("metadata-only", false, "Add metadata without renaming or moving videos (defaults to --metadata auto)")
+	keepBackup := flag.Bool("keep-backup", false, "Retain successful embedded-metadata recovery backups (default: remove after verified commit)")
+	metadataTimeout := flag.Duration("metadata-timeout", metadata.DefaultTimeout, "Maximum time for metadata commands per recording")
 	metadataSeason := flag.Int("metadata-season", 1, "Local season number for each independent Annict work; no season is inferred from its title")
 
 	flag.Usage = func() {
@@ -54,6 +59,8 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  EPGSTATION_URL         Optional EPGStation URL for recording-history recovery\n")
 	}
 	flag.Parse()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	if err := validateTargetArgs(flag.Args()); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n\n", err)
@@ -63,10 +70,19 @@ func main() {
 	if err := validateConfidenceThreshold(*confidenceThreshold); err != nil {
 		log.Fatal(err)
 	}
+	metadataExplicit := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "metadata" {
+			metadataExplicit = true
+		}
+	})
 	if *metadataOnly && *metadataMode == "none" {
+		if metadataExplicit {
+			log.Fatal("--metadata-only cannot be combined with --metadata none")
+		}
 		*metadataMode = "auto"
 	}
-	metadataConfig := &metadataOptions{mode: *metadataMode, only: *metadataOnly, season: *metadataSeason}
+	metadataConfig := &metadataOptions{mode: *metadataMode, only: *metadataOnly, season: *metadataSeason, keepBackup: *keepBackup, timeout: *metadataTimeout, ctx: ctx}
 	if err := metadataConfig.validate(*outputDir); err != nil {
 		log.Fatal(err)
 	}
@@ -81,8 +97,8 @@ func main() {
 	}
 
 	// Initialize components
-	annictClient := annict.NewClient(token)
-	syobocalClient := syobocal.NewClient()
+	annictClient := annict.NewClient(token).WithContext(ctx)
+	syobocalClient := syobocal.NewClient().WithContext(ctx)
 	if *epgstationURL == "" {
 		*epgstationURL = os.Getenv("EPGSTATION_URL")
 	}
@@ -95,7 +111,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		epgClient = client
+		epgClient = client.WithContext(ctx)
 	}
 
 	homeDir, err := os.UserHomeDir()
@@ -137,6 +153,7 @@ func main() {
 		processing.tsMetadataReader = tsmeta.ReadFile
 	}
 
+	organized := 0
 	renamed := 0
 	previewed := 0
 	skipped := 0
@@ -144,12 +161,18 @@ func main() {
 	metadataWritten, metadataPreviewed, metadataUnchanged, metadataPreserved := 0, 0, 0, 0
 
 	for _, file := range files {
+		if ctx.Err() != nil {
+			fmt.Fprintln(os.Stderr, "Interrupted: remaining files were not processed")
+			break
+		}
 		result := processFile(file, annictClient, c, workCache, episodesCache, programsCache, plannedDestinations, *dryRun, *verbose, *confidenceThreshold, *outputDir, processing)
 		metadataWritten += result.MetadataWritten
 		metadataPreviewed += result.MetadataPreviewed
 		metadataUnchanged += result.MetadataUnchanged
 		metadataPreserved += result.MetadataPreserved
-		if result.Renamed {
+		if result.Renamed && filepath.Clean(result.OriginalPath) == filepath.Clean(result.NewPath) {
+			organized++
+		} else if result.Renamed {
 			renamed++
 		} else if result.Previewed {
 			previewed++
@@ -176,14 +199,17 @@ func main() {
 	if *dryRun {
 		fmt.Fprintf(os.Stderr, "Dry-run mode: no recordings or metadata files were changed\n")
 		fmt.Fprintf(os.Stderr, "Would rename: %d\n", previewed)
-		fmt.Fprintf(os.Stderr, "Already organized: %d\n", renamed)
+		fmt.Fprintf(os.Stderr, "Already organized: %d\n", organized)
 	} else {
-		fmt.Fprintf(os.Stderr, "Renamed: %d\n", renamed)
+		fmt.Fprintf(os.Stderr, "Renamed: %d\nAlready organized: %d\n", renamed, organized)
 	}
 	fmt.Fprintf(os.Stderr, "Skipped: %d\n", skipped)
 	fmt.Fprintf(os.Stderr, "Failed:  %d\n", failed)
 	if *metadataMode != "none" {
 		fmt.Fprintf(os.Stderr, "Metadata: written=%d would-write=%d unchanged=%d preserved-existing=%d\n", metadataWritten, metadataPreviewed, metadataUnchanged, metadataPreserved)
+	}
+	if ctx.Err() != nil {
+		os.Exit(130)
 	}
 	if code := exitCodeForFailures(failed); code != 0 {
 		os.Exit(code)
@@ -324,6 +350,9 @@ func processFile(
 		if errors.Is(readErr, tsmeta.ErrAmbiguous) {
 			return &renamer.RenameResult{OriginalPath: file, SkipReason: readErr.Error()}
 		}
+		if readErr != nil && !errors.Is(readErr, tsmeta.ErrUnavailable) {
+			return &renamer.RenameResult{OriginalPath: file, Error: fmt.Errorf("read TS metadata: %w", readErr)}
+		}
 		if readErr == nil && broadcast != nil {
 			fileMeta, parseErr := parser.ParseBroadcastFilename(baseName)
 			if parseErr != nil {
@@ -431,8 +460,7 @@ func processFile(
 		if _, ok := episodesCache[w.ID]; !ok {
 			episodes, err := getEpisodes(client, c, w.ID, episodesCache)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "  Warning: could not get episodes for %s: %v\n", w.Title, err)
-				continue
+				return &renamer.RenameResult{OriginalPath: file, Error: fmt.Errorf("cannot verify all work candidates; episodes for %q: %w", w.Title, err)}
 			}
 			episodesCache[w.ID] = episodes
 			fmt.Fprintf(os.Stderr, "  Episodes: %d for %q\n", len(episodes), w.Title)
@@ -580,9 +608,7 @@ func processFile(
 	if shouldRetryRelated {
 		relatedWorks, relatedErr := searchRelatedWorks(client, c, meta.WorkTitle, workCache, episodesCache)
 		if relatedErr != nil {
-			if verbose {
-				fmt.Fprintf(os.Stderr, "  Warning: could not search related seasons: %v\n", relatedErr)
-			}
+			return &renamer.RenameResult{OriginalPath: file, Error: fmt.Errorf("related candidates could not be completely verified: %w", relatedErr)}
 		} else if relatedResult := matcher.MatchRelated(meta, relatedWorks, episodesCache, nil); relatedResult != nil && relatedResult.Episode != nil && (result.Episode == nil || relatedResult.Confidence > result.Confidence) {
 			works = relatedWorks
 			result = relatedResult
@@ -593,9 +619,7 @@ func processFile(
 	if meta.Subtitle != "" && result.Episode == nil {
 		specialWorks, specialErr := searchSpecialWorks(client, c, meta.WorkTitle, workCache, episodesCache)
 		if specialErr != nil {
-			if verbose {
-				fmt.Fprintf(os.Stderr, "  Warning: could not search explicit special works: %v\n", specialErr)
-			}
+			return &renamer.RenameResult{OriginalPath: file, Error: fmt.Errorf("special candidates could not be completely verified: %w", specialErr)}
 		} else if specialResult := matcher.Match(meta, specialWorks, episodesCache, nil); specialResult != nil && specialResult.Episode != nil && specialResult.Confidence > result.Confidence {
 			works = specialWorks
 			result = specialResult
@@ -1154,7 +1178,6 @@ func searchRelatedWorks(client *annict.Client, c *cache.Cache, title string, wc 
 		return nil, err
 	}
 	works = matcher.MatchingRelatedWorks(title, works)
-	wc[cacheKey] = works
 
 	for _, work := range works {
 		if episodes, ok := episodesByWork[work.ID]; ok && episodesComplete(work, episodes) {
@@ -1172,6 +1195,7 @@ func searchRelatedWorks(client *annict.Client, c *cache.Cache, title string, wc 
 			return nil, fmt.Errorf("get episodes for related work %q: %w", work.Title, err)
 		}
 	}
+	wc[cacheKey] = works
 	return works, nil
 }
 
@@ -1193,7 +1217,6 @@ func searchSpecialWorks(client *annict.Client, c *cache.Cache, title string, wc 
 		wc[cacheKey] = nil
 		return nil, nil
 	}
-	wc[cacheKey] = works
 
 	for _, work := range works {
 		if episodes, ok := episodesByWork[work.ID]; ok && episodesComplete(work, episodes) {
@@ -1211,6 +1234,7 @@ func searchSpecialWorks(client *annict.Client, c *cache.Cache, title string, wc 
 			return nil, fmt.Errorf("get episodes for special work %q: %w", work.Title, err)
 		}
 	}
+	wc[cacheKey] = works
 	return works, nil
 }
 
@@ -1378,6 +1402,11 @@ func loadEnvFromDotenv(target, key string) string {
 		dir = filepath.Dir(target)
 	}
 
+	absolute, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	dir = absolute
 	for {
 		if token, ok := readEnvFromFile(filepath.Join(dir, ".env"), key); ok {
 			return token

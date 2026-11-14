@@ -80,7 +80,7 @@ func TestEmbedNeroChaptersAllowsOnlyReferencedGeneratedTrack(t *testing.T) {
 	}
 	original, _ := os.ReadFile(path)
 	info, _ := FromMatch(verifiedMatch(), 1)
-	result, err := Embed(path, info, false)
+	result, err := EmbedWithOptions(path, info, false, EmbedOptions{KeepBackup: true})
 	if err != nil || result.Status != Created {
 		t.Fatalf("Nero-only metadata embedding: %+v, %v", result, err)
 	}

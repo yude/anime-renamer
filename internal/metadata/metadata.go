@@ -25,7 +25,7 @@ func FromMatch(match *matcher.MatchResult, season int) (Info, error) {
 	}
 	info := Info{WorkID: match.Work.ID, ShowTitle: match.Work.Title, Season: season}
 	if match.Standalone {
-		if !strings.EqualFold(match.Work.Media, "movie") || match.Episode != nil || match.RecordingEpisode != nil {
+		if !strings.EqualFold(match.Work.Media, "movie") || match.Episode != nil || match.RecordingEpisode != nil || match.OutputNumberSet || match.OutputEpisodeNumber != 0 || match.OutputEpisodeLabel != "" {
 			return Info{}, fmt.Errorf("metadata requires a verified standalone movie")
 		}
 		info.Title, info.Movie = match.Work.Title, true
@@ -35,7 +35,13 @@ func FromMatch(match *matcher.MatchResult, season int) (Info, error) {
 	if !ok || number <= 0 || match.Episode == nil || match.Episode.ID <= 0 || season <= 0 {
 		return Info{}, fmt.Errorf("episode metadata requires a positive integer episode and Annict episode ID; fractional episodes and unnumbered specials are not renumbered")
 	}
+	if match.Episode.Number == nil && strings.TrimSpace(match.Episode.NumberText) == "" {
+		return Info{}, fmt.Errorf("episode metadata requires an explicit Annict number; sort order alone is not an episode label")
+	}
 	info.Episode, info.EpisodeID = number, match.Episode.ID
+	if match.Episode.WorkID > 0 && match.Episode.WorkID != match.Work.ID {
+		return Info{}, fmt.Errorf("episode belongs to a different Annict work")
+	}
 	info.Title = match.Episode.Title
 	if match.FileSubtitle != "" {
 		info.Title = match.FileSubtitle
@@ -65,6 +71,9 @@ func encode(doc document) ([]byte, error) {
 	data, err := xml.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return nil, err
+	}
+	if len(data) > 1<<20 {
+		return nil, fmt.Errorf("NFO metadata exceeds 1 MiB")
 	}
 	return []byte(xml.Header + string(data) + "\n"), nil
 }

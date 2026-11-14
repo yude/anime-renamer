@@ -2,6 +2,7 @@ package annict
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -62,6 +63,7 @@ func isRetryableStatus(code int) bool {
 
 // Client is an Annict API client.
 type Client struct {
+	ctx         context.Context
 	accessToken string
 	baseURL     string
 	graphqlURL  string
@@ -122,6 +124,9 @@ type graphqlResponse struct {
 // graphqlSearchWorksResponse represents the GraphQL searchWorks response.
 type graphqlSearchWorksResponse struct {
 	SearchWorks struct {
+		PageInfo struct {
+			HasNextPage bool `json:"hasNextPage"`
+		} `json:"pageInfo"`
 		Edges []struct {
 			Node graphqlWorkNode `json:"node"`
 		} `json:"edges"`
@@ -140,6 +145,9 @@ type graphqlWorkNode struct {
 	EpisodesCount int    `json:"episodesCount"`
 	WatchersCount int    `json:"watchersCount"`
 	Episodes      struct {
+		PageInfo struct {
+			HasNextPage bool `json:"hasNextPage"`
+		} `json:"pageInfo"`
 		Edges []struct {
 			Node struct {
 				AnnictID   int      `json:"annictId"`
@@ -177,7 +185,8 @@ func (c *Client) SearchWorks(title string) ([]Work, map[int][]Episode, error) {
 // searchWorksGraphQL uses the GraphQL API to search for works.
 func (c *Client) searchWorksGraphQL(title string) ([]Work, map[int][]Episode, error) {
 	query := `query SearchWorks($titles: [String!]!) {
-  searchWorks(titles: $titles) {
+  searchWorks(titles: $titles, first: 100) {
+    pageInfo { hasNextPage }
     edges {
       node {
         annictId
@@ -190,6 +199,7 @@ func (c *Client) searchWorksGraphQL(title string) ([]Work, map[int][]Episode, er
         episodesCount
         watchersCount
         episodes(first: 100, orderBy: {field: SORT_NUMBER, direction: ASC}) {
+          pageInfo { hasNextPage }
           edges {
             node {
               annictId
@@ -235,6 +245,10 @@ func (c *Client) searchWorksGraphQL(title string) ([]Work, map[int][]Episode, er
 		return nil, nil, fmt.Errorf("decode search data: %w", err)
 	}
 
+	if searchResp.SearchWorks.PageInfo.HasNextPage {
+		return nil, nil, fmt.Errorf("GraphQL work search is incomplete; using paginated REST search")
+	}
+
 	// Multiple title variants are submitted in one query (see titles
 	// above); if the same underlying work matches more than one variant,
 	// dedupe by AnnictID so callers don't see it twice and mistake it for
@@ -244,6 +258,9 @@ func (c *Client) searchWorksGraphQL(title string) ([]Work, map[int][]Episode, er
 	episodesByWork := make(map[int][]Episode)
 	for _, edge := range searchResp.SearchWorks.Edges {
 		node := edge.Node
+		if node.AnnictID <= 0 || strings.TrimSpace(node.Title) == "" {
+			return nil, nil, fmt.Errorf("GraphQL returned an invalid work")
+		}
 		if seenWorkIDs[node.AnnictID] {
 			continue
 		}
@@ -264,11 +281,16 @@ func (c *Client) searchWorksGraphQL(title string) ([]Work, map[int][]Episode, er
 		}
 		works = append(works, w)
 
-		if len(node.Episodes.Edges) == 0 {
+		if len(node.Episodes.Edges) == 0 || node.Episodes.PageInfo.HasNextPage {
 			continue
 		}
 		episodes := make([]Episode, 0, len(node.Episodes.Edges))
+		seenEpisodes := make(map[int]bool)
 		for _, epEdge := range node.Episodes.Edges {
+			if epEdge.Node.AnnictID <= 0 || seenEpisodes[epEdge.Node.AnnictID] {
+				return nil, nil, fmt.Errorf("GraphQL returned invalid or duplicate episode IDs")
+			}
+			seenEpisodes[epEdge.Node.AnnictID] = true
 			episodes = append(episodes, Episode{
 				ID:         epEdge.Node.AnnictID,
 				Number:     epEdge.Node.Number,
@@ -571,21 +593,42 @@ func graphqlSeason(year int, name string) string {
 
 // searchWorksREST uses the REST API to search for works (fallback).
 func (c *Client) searchWorksREST(title string) ([]Work, error) {
-	params := url.Values{}
-	params.Set("filter_title", normalize.NormalizeForSearch(title))
-	params.Set("fields", "id,title,title_kana,season_name,syobocal_tid,episodes_count")
-	params.Set("per_page", "25")
-
-	var resp WorksResponse
-	if err := c.get("/works", params, &resp); err != nil {
-		return nil, fmt.Errorf("search works: %w", err)
+	var works []Work
+	seen := make(map[int]bool)
+	for page := 1; ; page++ {
+		params := url.Values{}
+		params.Set("filter_title", normalize.NormalizeForSearch(title))
+		params.Set("fields", "id,title,title_kana,media,season_name,syobocal_tid,episodes_count")
+		params.Set("per_page", strconv.Itoa(pageSize))
+		params.Set("page", strconv.Itoa(page))
+		var resp WorksResponse
+		if err := c.get("/works", params, &resp); err != nil {
+			return nil, fmt.Errorf("search works: %w", err)
+		}
+		if len(resp.Works) > pageSize {
+			return nil, fmt.Errorf("work search exceeded page size")
+		}
+		for _, work := range resp.Works {
+			if work.ID <= 0 || strings.TrimSpace(work.Title) == "" || seen[work.ID] {
+				return nil, fmt.Errorf("work search returned invalid or repeated IDs")
+			}
+			seen[work.ID] = true
+			works = append(works, work)
+		}
+		_, more, err := advancePage(page, len(resp.Works))
+		if err != nil {
+			return nil, err
+		}
+		if !more {
+			return works, nil
+		}
 	}
-	return resp.Works, nil
 }
 
 // GetEpisodes returns all episodes for a given work via REST API.
 func (c *Client) GetEpisodes(workID int) ([]Episode, error) {
 	var allEpisodes []Episode
+	seen := make(map[int]bool)
 	page := 1
 
 	for {
@@ -601,7 +644,14 @@ func (c *Client) GetEpisodes(workID int) ([]Episode, error) {
 			return nil, fmt.Errorf("get episodes: %w", err)
 		}
 
+		if len(resp.Episodes) > pageSize {
+			return nil, fmt.Errorf("episode response exceeds page size")
+		}
 		for i := range resp.Episodes {
+			if resp.Episodes[i].ID <= 0 || seen[resp.Episodes[i].ID] {
+				return nil, fmt.Errorf("episode response contains invalid or repeated IDs")
+			}
+			seen[resp.Episodes[i].ID] = true
 			resp.Episodes[i].WorkID = workID
 		}
 		allEpisodes = append(allEpisodes, resp.Episodes...)
@@ -676,17 +726,20 @@ func (c *Client) postGraphQL(query graphqlQuery) ([]byte, error) {
 	nextRetryAfter := ""
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
-			retrySleep(retryDelay(attempt, nextRetryAfter, time.Now()))
+			if err := c.waitRetry(retryDelay(attempt, nextRetryAfter, time.Now())); err != nil {
+				return nil, err
+			}
 		}
 		nextRetryAfter = ""
 
-		req, err := http.NewRequest("POST", c.graphqlURL, bytes.NewReader(body))
+		req, err := http.NewRequestWithContext(c.requestContext(), "POST", c.graphqlURL, bytes.NewReader(body))
 		if err != nil {
 			lastErr = fmt.Errorf("create request: %w", err)
 			continue
 		}
 
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", "anime-renamer (+https://github.com/yude/anime-renamer)")
 		req.Header.Set("Authorization", "Bearer "+c.accessToken)
 
 		resp, err := c.httpClient.Do(req)
@@ -737,15 +790,18 @@ func (c *Client) get(path string, params url.Values, result interface{}) error {
 	nextRetryAfter := ""
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
-			retrySleep(retryDelay(attempt, nextRetryAfter, time.Now()))
+			if err := c.waitRetry(retryDelay(attempt, nextRetryAfter, time.Now())); err != nil {
+				return err
+			}
 		}
 		nextRetryAfter = ""
 
-		req, err := http.NewRequest("GET", u, nil)
+		req, err := http.NewRequestWithContext(c.requestContext(), "GET", u, nil)
 		if err != nil {
 			lastErr = fmt.Errorf("create request: %w", err)
 			continue
 		}
+		req.Header.Set("User-Agent", "anime-renamer (+https://github.com/yude/anime-renamer)")
 		req.Header.Set("Authorization", "Bearer "+c.accessToken)
 
 		resp, err := c.httpClient.Do(req)
@@ -792,6 +848,9 @@ func (c *Client) get(path string, params url.Values, result interface{}) error {
 func retryDelay(attempt int, retryAfter string, now time.Time) time.Duration {
 	delay := time.Duration(attempt) * time.Second
 	if seconds, err := strconv.Atoi(strings.TrimSpace(retryAfter)); err == nil && seconds >= 0 {
+		if seconds >= int(maxRetryDelay/time.Second) {
+			return maxRetryDelay
+		}
 		if serverDelay := time.Duration(seconds) * time.Second; serverDelay > delay {
 			delay = serverDelay
 		}
@@ -837,4 +896,27 @@ func truncationSuffix(truncated bool) string {
 		return " [truncated]"
 	}
 	return ""
+}
+
+func (c *Client) WithContext(ctx context.Context) *Client { c.ctx = ctx; return c }
+func (c *Client) requestContext() context.Context {
+	if c.ctx != nil {
+		return c.ctx
+	}
+	return context.Background()
+}
+
+func (c *Client) waitRetry(delay time.Duration) error {
+	if c.ctx == nil {
+		retrySleep(delay)
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-c.ctx.Done():
+		return c.ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }

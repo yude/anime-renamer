@@ -73,7 +73,7 @@ func TestEmbeddedRoundTripPreservesStreamsBackupAndReruns(t *testing.T) {
 			if got, _ := os.ReadFile(path); !bytes.Equal(got, original) {
 				t.Fatal("dry-run changed video")
 			}
-			result, err := Embed(path, info, false)
+			result, err := EmbedWithOptions(path, info, false, EmbedOptions{KeepBackup: true})
 			if err != nil || result.Status != Created {
 				t.Fatalf("embed: %+v, %v", result, err)
 			}
@@ -89,12 +89,12 @@ func TestEmbeddedRoundTripPreservesStreamsBackupAndReruns(t *testing.T) {
 				t.Fatal("recording timestamp changed")
 			}
 			written, _ := os.ReadFile(path)
-			result, err = Embed(path, info, false)
+			result, err = EmbedWithOptions(path, info, false, EmbedOptions{KeepBackup: true})
 			if err != nil || result.Status != Unchanged {
 				t.Fatalf("rerun: %+v, %v", result, err)
 			}
 			info.Title = "変更された字幕"
-			if _, err := Embed(path, info, false); err == nil {
+			if _, err := EmbedWithOptions(path, info, false, EmbedOptions{KeepBackup: true}); err == nil {
 				t.Fatal("must not overwrite an existing backup on a later update")
 			}
 			if got, _ := os.ReadFile(path); !bytes.Equal(got, written) {

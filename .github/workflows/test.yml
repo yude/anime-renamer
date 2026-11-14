@@ -31,6 +31,11 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Install media tools for integration tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+
       - name: Test with race detector
         run: go test -race ./...
 

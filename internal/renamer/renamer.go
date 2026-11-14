@@ -10,6 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/yude/anime-renamer/internal/fileops"
 	"github.com/yude/anime-renamer/internal/matcher"
 )
 
@@ -161,13 +162,6 @@ func BuildPath(originalPath string, result *matcher.MatchResult) (string, error)
 	return filepath.Join(workDir, filename), nil
 }
 
-// buildFilename formats a recording name while preserving the identifying
-// work title, episode number, and extension. When the official subtitle would
-// exceed the per-component filesystem limit, only that subtitle is shortened.
-func buildFilename(workTitle string, episode int, subtitle, ext string) (string, error) {
-	return buildLabeledFilename(workTitle, fmt.Sprint(episode), subtitle, ext)
-}
-
 func buildLabeledFilename(workTitle, episode, subtitle, ext string) (string, error) {
 	if subtitle != "" {
 		prefix := fmt.Sprintf("%s #%s 「", workTitle, episode)
@@ -295,7 +289,7 @@ func RenameWithReservations(originalPath string, result *matcher.MatchResult, dr
 
 	// Create directory
 	dir := filepath.Dir(newPath)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := fileops.MkdirAll(dir, 0o755); err != nil {
 		r.Error = fmt.Errorf("create directory %s: %w", dir, err)
 		return r
 	}
@@ -392,20 +386,33 @@ func numberedDuplicateFilename(filename string, sequence int) (string, error) {
 // are unavailable (most commonly across filesystems), it falls back to a
 // copy-then-remove operation with the same no-replace guarantee.
 func moveFile(src, dst string) error {
-	if err := os.Link(src, dst); err == nil {
-		if err := os.Remove(src); err != nil {
-			return fmt.Errorf("remove original after linking destination: %w", err)
-		}
-		return nil
-	} else if errors.Is(err, os.ErrExist) {
-		return fmt.Errorf("destination already exists: %s", dst)
-	}
-
-	if err := copyFile(src, dst); err != nil {
+	before, err := os.Lstat(src)
+	if err != nil {
 		return err
 	}
+	if !before.Mode().IsRegular() {
+		return fmt.Errorf("source is not a regular file: %s", src)
+	}
+	if err := os.Link(src, dst); err == nil {
+		if err := fileops.Unchanged(src, before); err != nil {
+			return errors.Join(err, os.Remove(dst))
+		}
+		if err := fileops.SyncDir(filepath.Dir(dst)); err != nil {
+			return fmt.Errorf("sync destination %s; source retained: %w", dst, err)
+		}
+	} else if errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("destination already exists: %s", dst)
+	} else if err := copyFile(src, dst); err != nil {
+		return err
+	}
+	if err := fileops.Unchanged(src, before); err != nil {
+		return fmt.Errorf("%w (copy retained at %s)", err, dst)
+	}
 	if err := os.Remove(src); err != nil {
-		return fmt.Errorf("remove original after copy: %w", err)
+		return fmt.Errorf("remove original; destination retained at %s: %w", dst, err)
+	}
+	if err := fileops.SyncDir(filepath.Dir(src)); err != nil {
+		return fmt.Errorf("source removed, destination retained at %s; sync source directory: %w", dst, err)
 	}
 	return nil
 }
@@ -413,7 +420,9 @@ func moveFile(src, dst string) error {
 // copyFile copies src to dst via a unique temp file in dst's directory. It
 // publishes the completed temp file without replacing an existing dst and
 // never touches src.
-func copyFile(src, dst string) (err error) {
+func copyFile(src, dst string) error { return copyFileWith(src, dst, io.CopyN) }
+
+func copyFileWith(src, dst string, copyContents func(io.Writer, io.Reader, int64) (int64, error)) (err error) {
 	in, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("open source: %w", err)
@@ -424,21 +433,41 @@ func copyFile(src, dst string) (err error) {
 	if err != nil {
 		return fmt.Errorf("stat source: %w", err)
 	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("source is not a regular file: %s", src)
+	}
+	if err := fileops.Unchanged(src, info); err != nil {
+		return err
+	}
 
-	tmp, err := os.CreateTemp(filepath.Dir(dst), "."+filepath.Base(dst)+".anime-renamer-tmp-*")
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".anime-renamer-move-*.tmp")
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
 	}
 	defer func() {
-		tmp.Close()
-		os.Remove(tmp.Name())
+		_ = tmp.Close()
+		if cleanup := os.Remove(tmp.Name()); cleanup != nil && !errors.Is(cleanup, os.ErrNotExist) {
+			err = errors.Join(err, fmt.Errorf("remove temp %s: %w", tmp.Name(), cleanup))
+		}
 	}()
+	if err := fileops.PreserveOwner(tmp.Name(), info); err != nil {
+		return err
+	}
 	if err := tmp.Chmod(info.Mode().Perm()); err != nil {
 		return fmt.Errorf("set temp file mode: %w", err)
 	}
 
-	if _, err = io.Copy(tmp, in); err != nil {
+	if _, err = copyContents(tmp, in, info.Size()); err != nil {
 		return fmt.Errorf("copy contents: %w", err)
+	}
+	if err := fileops.Unchanged(src, info); err != nil {
+		return err
+	}
+	if err := fileops.PreserveXattrs(src, tmp.Name()); err != nil {
+		return err
+	}
+	if err := os.Chtimes(tmp.Name(), info.ModTime(), info.ModTime()); err != nil {
+		return err
 	}
 	if err = tmp.Sync(); err != nil {
 		return fmt.Errorf("sync copied file: %w", err)
@@ -457,45 +486,5 @@ func copyFile(src, dst string) (err error) {
 // Hard-linking is atomic. Filesystems without hard-link support fall back to
 // an O_EXCL copy, which retains the no-replace guarantee.
 func publishTempFile(tmp, dst string, mode os.FileMode) error {
-	if err := os.Link(tmp, dst); err == nil {
-		return nil
-	} else if errors.Is(err, os.ErrExist) {
-		return fmt.Errorf("destination already exists: %s", dst)
-	}
-
-	in, err := os.Open(tmp)
-	if err != nil {
-		return fmt.Errorf("open completed temp file: %w", err)
-	}
-	defer in.Close()
-
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
-	if err != nil {
-		if errors.Is(err, os.ErrExist) {
-			return fmt.Errorf("destination already exists: %s", dst)
-		}
-		return fmt.Errorf("create destination: %w", err)
-	}
-	removeIncomplete := true
-	defer func() {
-		out.Close()
-		if removeIncomplete {
-			os.Remove(dst)
-		}
-	}()
-
-	if _, err := io.Copy(out, in); err != nil {
-		return fmt.Errorf("publish copied file: %w", err)
-	}
-	if err := out.Sync(); err != nil {
-		return fmt.Errorf("sync destination: %w", err)
-	}
-	if err := out.Close(); err != nil {
-		return fmt.Errorf("close destination: %w", err)
-	}
-	if err := os.Chmod(dst, mode); err != nil {
-		return fmt.Errorf("set destination mode: %w", err)
-	}
-	removeIncomplete = false
-	return nil
+	return fileops.Publish(tmp, dst, mode)
 }

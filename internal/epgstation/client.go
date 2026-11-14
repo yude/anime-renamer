@@ -2,6 +2,7 @@
 package epgstation
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -41,6 +42,7 @@ type Channel struct {
 }
 
 type Client struct {
+	ctx        context.Context
 	baseURL    *url.URL
 	httpClient *http.Client
 	queries    map[string][]Recording
@@ -176,7 +178,7 @@ func (c *Client) get(endpoint string, query url.Values, result any) error {
 	u := *c.baseURL
 	u.Path += endpoint
 	u.RawQuery = query.Encode()
-	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
+	req, err := http.NewRequestWithContext(c.requestContext(), http.MethodGet, u.String(), nil)
 	if err != nil {
 		return err
 	}
@@ -225,4 +227,12 @@ func searchKeyword(title string) string {
 		}
 	}
 	return best
+}
+
+func (c *Client) WithContext(ctx context.Context) *Client { c.ctx = ctx; return c }
+func (c *Client) requestContext() context.Context {
+	if c.ctx != nil {
+		return c.ctx
+	}
+	return context.Background()
 }

@@ -82,7 +82,7 @@ func TestSearchPaginatesBeforeChoosingARecord(t *testing.T) {
 						t.Errorf("unexpected offset: %s", r.URL)
 					}
 					if change == "later page failed" {
-						http.Error(w, "unavailable", 503)
+						http.Error(w, "unavailable", http.StatusServiceUnavailable)
 						return
 					}
 					records = []map[string]any{{"id": 101}}
@@ -124,7 +124,7 @@ func TestRejectsInvalidURLAndRedirects(t *testing.T) {
 			t.Errorf("NewClient(%q) accepted invalid URL", raw)
 		}
 	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/login", 302) }))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/login", http.StatusFound) }))
 	defer server.Close()
 	client, _ := NewClient(server.URL)
 	if _, err := client.GetChannel(400141); err == nil || !strings.Contains(err.Error(), "HTTP 302") {

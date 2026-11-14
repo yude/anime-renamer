@@ -2,18 +2,18 @@ package metadata
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"maps"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/yude/anime-renamer/internal/fileops"
 )
 
 // Backups have an unsupported video extension so Jellyfin and recursive reruns
@@ -41,64 +41,6 @@ type probeStream struct {
 	CodecTag    string            `json:"codec_tag_string"`
 	Disposition map[string]int    `json:"disposition"`
 	Tags        map[string]string `json:"tags"`
-}
-
-// limitedBuffer bounds diagnostic output from external programs.
-type limitedBuffer struct{ bytes.Buffer }
-
-func (b *limitedBuffer) Write(p []byte) (int, error) {
-	n := len(p)
-	if remaining := (16 << 10) - b.Len(); remaining > 0 {
-		_, _ = b.Buffer.Write(p[:min(len(p), remaining)])
-	}
-	return n, nil
-}
-
-func run(program string, args ...string) ([]byte, error) {
-	cmd := exec.Command(program, args...)
-	var stdout bytes.Buffer
-	var stderr limitedBuffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("%s: %w: %s", program, err, strings.TrimSpace(stderr.String()))
-	}
-	return stdout.Bytes(), nil
-}
-
-func packetHash(path string, streams []probeStream) ([]byte, error) {
-	// Framehash records each copied packet's timestamp, duration, size and
-	// encoded payload hash. Hash the textual output as a stream to bound memory
-	// use for multi-gigabyte recordings. No decoding or transcoding takes place.
-	args := []string{"-nostdin", "-v", "error", "-copyts", "-i", path}
-	for _, stream := range streams {
-		args = append(args, "-map", fmt.Sprintf("0:%d", stream.Index))
-	}
-	args = append(args, "-c", "copy", "-avoid_negative_ts", "disabled", "-f", "framehash", "-hash", "sha256", "-")
-	cmd := exec.Command("ffmpeg", args...)
-	digest := sha256.New()
-	var stderr limitedBuffer
-	cmd.Stdout, cmd.Stderr = digest, &stderr
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("verify copied packets: %w: %s", err, strings.TrimSpace(stderr.String()))
-	}
-	return digest.Sum(nil), nil
-}
-
-func readProbe(path string) (*probe, error) {
-	data, err := run("ffprobe", "-v", "error", "-show_streams", "-show_format", "-show_chapters", "-of", "json", path)
-	if err != nil {
-		return nil, err
-	}
-	var p probe
-	if err := json.Unmarshal(data, &p); err != nil {
-		return nil, err
-	}
-	tags := make(map[string]string)
-	for key, value := range p.Format.Tags {
-		tags[strings.ToLower(key)] = value
-	}
-	p.Format.Tags = tags
-	return &p, nil
 }
 
 func Backend(mode, path string) (string, error) {
@@ -164,18 +106,61 @@ func retainedTags(before, after, replaced map[string]string) bool {
 }
 
 // Embed remuxes a supported container using stream copy, verifies packet hashes
-// and metadata, preserves an exclusive backup, then replaces the video. It never
-// transcodes, edits the source in place, or removes an existing backup.
+// and metadata, creates an exclusive recovery backup, then replaces the video.
+// Successful backups are removed after a durable commit. It never transcodes
+// or edits the source in place.
 func Embed(path string, info Info, dryRun bool) (Result, error) {
-	result := Result{Path: path}
+	return EmbedWithOptions(path, info, dryRun, EmbedOptions{})
+}
+
+// EmbedWithOptions discards recovery backups only after a verified, durable
+// replacement. KeepBackup is an explicit opt-in to retaining successful copies.
+func EmbedWithOptions(path string, info Info, dryRun bool, options EmbedOptions) (result Result, err error) {
+	result = Result{Path: path}
+	parent := options.Context
+	if parent == nil {
+		parent = context.Background()
+	}
+	timeout := options.Timeout
+	if timeout == 0 {
+		timeout = DefaultTimeout
+	}
+	if timeout < 0 {
+		return result, fmt.Errorf("metadata timeout must be positive")
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
+	defer cancel()
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return result, err
+	}
+	path = absolute
+	if err := ctx.Err(); err != nil {
+		return result, err
+	}
 	if _, err := Backend("embedded", path); err != nil {
 		return result, err
 	}
 	before, err := os.Lstat(path)
-	if err != nil || !before.Mode().IsRegular() {
+	if err != nil {
+		return result, fmt.Errorf("inspect metadata source %s: %w", path, err)
+	}
+	if !before.Mode().IsRegular() {
 		return result, fmt.Errorf("metadata source must be a regular file: %s", path)
 	}
-	original, err := readProbe(path)
+	if !dryRun {
+		lockPath := filepath.Join(filepath.Dir(path), fmt.Sprintf(".anime-renamer-%x.lock", sha256.Sum256([]byte(filepath.Base(path)))))
+		release, lockErr := fileops.Lock(lockPath)
+		if lockErr != nil {
+			return result, lockErr
+		}
+		defer func() { err = errors.Join(err, release()) }()
+		// The source may have changed while another operation held the lock.
+		if err := fileops.Unchanged(path, before); err != nil {
+			return result, err
+		}
+	}
+	original, err := readProbeContext(ctx, path)
 	if err != nil {
 		return result, err
 	}
@@ -194,7 +179,7 @@ func Embed(path string, info Info, dryRun bool) (Result, error) {
 		provenance += fmt.Sprintf("/episodes/%d", info.EpisodeID)
 	}
 	comment := original.Format.Tags["comment"]
-	if !strings.Contains(comment, provenance) {
+	if !slices.Contains(strings.Split(comment, "\n"), provenance) {
 		if comment != "" {
 			comment += "\n"
 		}
@@ -203,7 +188,10 @@ func Embed(path string, info Info, dryRun bool) (Result, error) {
 	tags["comment"] = comment
 	if tagsMatch(original, tags) {
 		result.Status = Unchanged
-		return result, nil
+		if !dryRun {
+			result.Backup, err = finishExistingBackup(ctx, path, before, original, tags, format == "mov", options.KeepBackup)
+		}
+		return result, err
 	}
 	result.Backup = BackupPath(path)
 	if _, err := os.Lstat(result.Backup); err == nil {
@@ -223,11 +211,14 @@ func Embed(path string, info Info, dryRun bool) (Result, error) {
 	}
 	tempPath := temp.Name()
 	if err := temp.Close(); err != nil {
-		_ = os.Remove(tempPath)
-		return result, err
+		return result, errors.Join(err, os.Remove(tempPath))
 	}
-	defer os.Remove(tempPath)
-	args := []string{"-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-copyts", "-i", path, "-map", "0", "-map_metadata", "0", "-map_chapters", "0", "-c", "copy", "-copy_unknown", "-avoid_negative_ts", "disabled"}
+	defer func() {
+		if cleanup := os.Remove(tempPath); cleanup != nil && !errors.Is(cleanup, os.ErrNotExist) {
+			err = errors.Join(err, fmt.Errorf("remove temp %s: %w", tempPath, cleanup))
+		}
+	}()
+	args := []string{"-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-copyts", "-protocol_whitelist", "file,pipe", "-i", path, "-map", "0", "-map_metadata", "0", "-map_chapters", "0", "-c", "copy", "-copy_unknown", "-avoid_negative_ts", "disabled"}
 	keys := make([]string, 0, len(tags))
 	for key := range tags {
 		keys = append(keys, key)
@@ -243,56 +234,30 @@ func Embed(path string, info Info, dryRun bool) (Result, error) {
 		args = append(args, "-f", "matroska")
 	}
 	args = append(args, tempPath)
-	if _, err := run("ffmpeg", args...); err != nil {
+	if _, err := runContext(ctx, "ffmpeg", args...); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return result, err
+		}
 		return result, fmt.Errorf("%w: %v", ErrCannotEmbed, err)
 	}
-	updated, err := readProbe(tempPath)
+	updated, err := readProbeContext(ctx, tempPath)
 	if err != nil {
 		return result, err
 	}
-	if !tagsMatch(updated, tags) {
-		return result, fmt.Errorf("%w: remux did not retain the requested metadata", ErrCannotEmbed)
+	if err := verifyEmbeddedFiles(ctx, path, tempPath, original, updated, tags, format == "mov"); err != nil {
+		return result, err
 	}
-	addedChapterTrack, err := verifyStreamLayout(original, updated, tempPath, format == "mov")
-	if err != nil {
-		return result, fmt.Errorf("%w: %v", ErrCannotEmbed, err)
+	if err := fileops.Unchanged(path, before); err != nil {
+		return result, err
 	}
-	if !retainedTags(original.Format.Tags, updated.Format.Tags, tags) {
-		return result, fmt.Errorf("%w: remux lost existing metadata", ErrCannotEmbed)
-	}
-	for index, before := range original.Streams {
-		after := updated.Streams[index]
-		if before.CodecType != after.CodecType || before.CodecName != after.CodecName || !maps.Equal(before.Disposition, after.Disposition) || !retainedTags(before.Tags, after.Tags, nil) {
-			return result, fmt.Errorf("%w: remux changed stream %d or its metadata", ErrCannotEmbed, index)
-		}
-	}
-	if !chaptersEqual(original.Chapters, updated.Chapters, addedChapterTrack) {
-		return result, fmt.Errorf("%w: remux changed chapters", ErrCannotEmbed)
-	}
-	var originalHash []byte
-	for _, candidate := range []struct {
-		path    string
-		streams []probeStream
-	}{{path, original.Streams}, {tempPath, updated.Streams[:len(original.Streams)]}} {
-		// Unsupported streams fail safely, retaining the original source.
-		// A newly synthesized chapter track is checked by its MP4 references
-		// and chapter contents; every original stream still gets hashed.
-		hash, err := packetHash(candidate.path, candidate.streams)
-		if err != nil {
-			return result, fmt.Errorf("%w: %v", ErrCannotEmbed, err)
-		}
-		if candidate.path == path {
-			originalHash = hash
-		} else if !bytes.Equal(originalHash, hash) {
-			return result, fmt.Errorf("%w: remux changed packet payloads, headers or timing", ErrCannotEmbed)
-		}
-	}
-	current, err := os.Lstat(path)
-	if err != nil || !os.SameFile(before, current) || current.Size() != before.Size() || !current.ModTime().Equal(before.ModTime()) {
-		return result, fmt.Errorf("source changed during metadata processing")
+	if err := fileops.PreserveOwner(tempPath, before); err != nil {
+		return result, err
 	}
 	if err := os.Chmod(tempPath, before.Mode().Perm()); err != nil {
 		return result, err
+	}
+	if err := fileops.PreserveXattrs(path, tempPath); err != nil {
+		return result, fmt.Errorf("preserve extended attributes: %w", err)
 	}
 	if err := os.Chtimes(tempPath, before.ModTime(), before.ModTime()); err != nil {
 		return result, err
@@ -304,44 +269,64 @@ func Embed(path string, info Info, dryRun bool) (Result, error) {
 	if err := errors.Join(completed.Sync(), completed.Close()); err != nil {
 		return result, err
 	}
-	if err := makeBackup(path, result.Backup); err != nil {
+	if err := ctx.Err(); err != nil {
 		return result, err
 	}
-	if err := os.Rename(tempPath, path); err != nil {
-		return result, fmt.Errorf("replace video (original also retained at %s): %w", result.Backup, err)
+	replaced, err := commitReplacement(path, tempPath, result.Backup, before, options.KeepBackup, replacementOps{
+		backup: makeBackup, replace: os.Rename, syncDir: fileops.SyncDir, remove: os.Remove,
+	})
+	if replaced {
+		result.Status = Created
 	}
-	result.Status = Created
-	return result, nil
+	if _, statErr := os.Lstat(result.Backup); errors.Is(statErr, os.ErrNotExist) {
+		result.Backup = ""
+	}
+	return result, err
 }
 
-func makeBackup(source, destination string) error {
-	dir := filepath.Dir(destination)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
+func verifyEmbeddedFiles(ctx context.Context, source, target string, original, updated *probe, tags map[string]string, mp4 bool) error {
+	if !tagsMatch(updated, tags) {
+		return fmt.Errorf("%w: remux did not retain the requested metadata", ErrCannotEmbed)
 	}
-	if info, err := os.Lstat(dir); err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("backup directory is not a real directory: %s", dir)
-	}
-	if err := os.Link(source, destination); err == nil {
-		return nil
-	} else if errors.Is(err, os.ErrExist) {
-		return err
-	}
-	in, err := os.Open(source)
+	addedChapterTrack, err := verifyStreamLayout(original, updated, target, mp4)
 	if err != nil {
-		return err
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return err
+		}
+		return fmt.Errorf("%w: %v", ErrCannotEmbed, err)
 	}
-	defer in.Close()
-	out, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-	if err != nil {
-		return err
+	if !retainedTags(original.Format.Tags, updated.Format.Tags, tags) {
+		return fmt.Errorf("%w: remux lost existing metadata", ErrCannotEmbed)
 	}
-	_, copyErr := io.Copy(out, in)
-	syncErr := out.Sync()
-	closeErr := out.Close()
-	if err := errors.Join(copyErr, syncErr, closeErr); err != nil {
-		_ = os.Remove(destination)
-		return err
+	for index, before := range original.Streams {
+		after := updated.Streams[index]
+		if before.CodecType != after.CodecType || before.CodecName != after.CodecName || !maps.Equal(before.Disposition, after.Disposition) || !retainedTags(before.Tags, after.Tags, nil) {
+			return fmt.Errorf("%w: remux changed stream %d or its metadata", ErrCannotEmbed, index)
+		}
+	}
+	if !chaptersEqual(original.Chapters, updated.Chapters, addedChapterTrack) {
+		return fmt.Errorf("%w: remux changed chapters", ErrCannotEmbed)
+	}
+	var originalHash []byte
+	for _, candidate := range []struct {
+		path    string
+		streams []probeStream
+	}{{source, original.Streams}, {target, updated.Streams[:len(original.Streams)]}} {
+		// Unsupported streams fail safely, retaining the original source.
+		// A newly synthesized chapter track is checked by its MP4 references
+		// and chapter contents; every original stream still gets hashed.
+		hash, err := packetHash(ctx, candidate.path, candidate.streams)
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return err
+			}
+			return fmt.Errorf("%w: %v", ErrCannotEmbed, err)
+		}
+		if candidate.path == source {
+			originalHash = hash
+		} else if !bytes.Equal(originalHash, hash) {
+			return fmt.Errorf("%w: remux changed packet payloads, headers or timing", ErrCannotEmbed)
+		}
 	}
 	return nil
 }

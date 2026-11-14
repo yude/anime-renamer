@@ -181,6 +181,9 @@ func kanjiToInt(s string) (int, bool) {
 			if hasUnit && currentDigit >= 0 {
 				return 0, false
 			}
+			if decimal > (int(^uint(0)>>1)-digit)/10 {
+				return 0, false
+			}
 			decimal = decimal*10 + digit
 			currentDigit = digit
 			if !hasUnit {

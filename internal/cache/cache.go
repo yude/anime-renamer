@@ -244,6 +244,9 @@ func (c *Cache) syobocalPath(tid int, date time.Time) string {
 
 // Clear removes all cached files.
 func (c *Cache) Clear() error {
+	if !c.enabled {
+		return nil
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return os.RemoveAll(c.dir)

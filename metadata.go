@@ -2,20 +2,28 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"time"
 
+	"github.com/yude/anime-renamer/internal/fileops"
 	"github.com/yude/anime-renamer/internal/matcher"
 	"github.com/yude/anime-renamer/internal/metadata"
 	"github.com/yude/anime-renamer/internal/renamer"
 )
 
 type metadataOptions struct {
-	mode   string
-	only   bool
-	season int
+	mode       string
+	only       bool
+	season     int
+	keepBackup bool
+	timeout    time.Duration
+	ctx        context.Context
+	plannedNFO map[string][]byte
 }
 
 func (o *metadataOptions) validate(output string) error {
@@ -23,6 +31,9 @@ func (o *metadataOptions) validate(output string) error {
 	case "none", "auto", "embedded", "nfo":
 	default:
 		return fmt.Errorf("--metadata must be none, auto, embedded or nfo")
+	}
+	if o.timeout < 0 {
+		return fmt.Errorf("--metadata-timeout must be positive")
 	}
 	if o.season <= 0 {
 		return fmt.Errorf("--metadata-season must be a positive integer")
@@ -34,6 +45,9 @@ func (o *metadataOptions) validate(output string) error {
 }
 
 func processMatchedMetadata(file string, match *matcher.MatchResult, dryRun bool, outputDir string, plans map[string]string, options *metadataOptions) *renamer.RenameResult {
+	if options.ctx != nil && options.ctx.Err() != nil {
+		return &renamer.RenameResult{OriginalPath: file, Error: options.ctx.Err()}
+	}
 	if match.Confidence < matcher.AutoRenameThreshold {
 		return &renamer.RenameResult{OriginalPath: file, SkipReason: "metadata requires confidence >= 90 even when --confidence is lower"}
 	}
@@ -45,8 +59,21 @@ func processMatchedMetadata(file string, match *matcher.MatchResult, dryRun bool
 	if err != nil {
 		return &renamer.RenameResult{OriginalPath: file, SkipReason: err.Error()}
 	}
+	if _, err := info.VideoNFO(); err != nil {
+		return &renamer.RenameResult{OriginalPath: file, Error: err}
+	}
+	if backend == "embedded" {
+		for _, tool := range []string{"ffprobe", "ffmpeg"} {
+			if _, err := exec.LookPath(tool); err != nil {
+				return &renamer.RenameResult{OriginalPath: file, Error: err}
+			}
+		}
+	}
 	source, err := os.Lstat(file)
-	if err != nil || !source.Mode().IsRegular() {
+	if err != nil {
+		return &renamer.RenameResult{OriginalPath: file, Error: fmt.Errorf("inspect metadata source %s: %w", file, err)}
+	}
+	if !source.Mode().IsRegular() {
 		return &renamer.RenameResult{OriginalPath: file, Error: fmt.Errorf("metadata source is not a regular file: %s", file)}
 	}
 	plannedPath := file
@@ -92,16 +119,16 @@ func processMatchedMetadata(file string, match *matcher.MatchResult, dryRun bool
 		if dryRun {
 			input = file
 		}
-		result, embedErr := metadata.Embed(input, info, dryRun)
+		result, embedErr := metadata.EmbedWithOptions(input, info, dryRun, metadata.EmbedOptions{KeepBackup: options.keepBackup, Timeout: options.timeout, Context: options.ctx})
 		result.Path = r.NewPath
 		if result.Backup != "" {
 			result.Backup = metadata.BackupPath(r.NewPath)
 		}
 		err = embedErr
-		if err == nil {
+		if err == nil || result.Status == metadata.Created || result.Status == metadata.Unchanged {
 			results = append(results, result)
 		}
-		if options.mode == "auto" && errors.Is(err, metadata.ErrCannotEmbed) {
+		if result.Status == "" && options.mode == "auto" && errors.Is(err, metadata.ErrCannotEmbed) {
 			fmt.Fprintf(os.Stderr, "  Fallback:  %v; preserving video and writing NFO instead\n", err)
 			backend = "nfo"
 		}
@@ -115,7 +142,10 @@ func processMatchedMetadata(file string, match *matcher.MatchResult, dryRun bool
 				showDir = dir
 			}
 		}
-		results, err = metadata.WriteNFO(r.NewPath, showDir, info, dryRun)
+		if options.plannedNFO == nil {
+			options.plannedNFO = make(map[string][]byte)
+		}
+		results, err = metadata.WriteNFO(r.NewPath, showDir, info, dryRun, options.plannedNFO)
 	}
 	for _, result := range results {
 		fmt.Fprintf(os.Stderr, "  Metadata:  %s (%s): %s\n", backend, result.Status, result.Path)
@@ -151,6 +181,6 @@ func matchesGeneratedNFO(path string, info metadata.Info) bool {
 	if err != nil || stat.Size() != int64(len(expected)) {
 		return false
 	}
-	data, err := os.ReadFile(path)
+	data, err := fileops.ReadRegular(path, int64(len(expected)))
 	return err == nil && bytes.Equal(data, expected)
 }

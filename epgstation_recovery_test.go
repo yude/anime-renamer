@@ -108,7 +108,7 @@ func TestProcessFileEPGStationRecovery(t *testing.T) {
 			syobocalServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Query().Get("Command") == "ChLookup" {
 					if tt.catalogue == "failure" {
-						http.Error(w, "unavailable", 503)
+						http.Error(w, "unavailable", http.StatusServiceUnavailable)
 						return
 					}
 					extra := ""
