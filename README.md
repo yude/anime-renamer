@@ -86,6 +86,10 @@ anime-renamer /recordings/
 | `--metadata-season` | Annict作品ごとのローカルなシーズン番号（既定 `1`）。作品名の「第2期」などから推測しない |
 | `--keep-backup` | 埋め込み成功後も元動画のバックアップを保持。省略時は検証・置き換え・同期の成功後に削除 |
 | `--metadata-timeout` | 動画1本の埋め込み・検証に使える時間（既定 `30m`）。大きい録画や低速ストレージでは `2h` などを指定 |
+| `--artwork` | リネーム／メタデータ付与後、確認できた作品フォルダへポスターとサムネイルを追加。既定では無効 |
+| `--artwork-only` | 既存のAnnict作品IDを使って画像だけを後付け。動画名・配置・動画タグ・NFOは変更しない |
+| `--artwork-timeout` | 作品フォルダ1件の画像処理の制限時間（既定 `45s`） |
+| `--artwork-font-license` | 同梱日本語フォントの著作権表示とライセンスを表示 |
 
 対応する拡張子は `.mp4` `.ts` `.m2ts` `.mkv` `.m4v` です。
 
@@ -133,6 +137,31 @@ HEVCのMP4では、FFmpeg 7以降が初期化ヘッダー（`hvcC`）の `parall
 Jellyfinでは対象ライブラリの「埋め込みタイトルを優先」「埋め込みエピソード情報を優先」を有効にし、対象作品のメタデータを更新してください。既に付いている誤った話数は、埋め込み情報を優先して再取得する必要があります。動画の更新日時は保持するため、通常のファイル監視による自動反映には依存しません。NFOも対象作品のメタデータ更新で読み込ませます。CLIからJellyfinの設定変更やライブラリ全体のスキャンは実行しません。
 
 形式は [JellyfinのNFO仕様](https://jellyfin.org/docs/general/server/metadata/nfo/) と [Jellyfin 10.11.7の埋め込みタグ読み取り](https://github.com/jellyfin/jellyfin/blob/v10.11.7/MediaBrowser.MediaEncoding/Probing/ProbeResultNormalizer.cs) に合わせています。あらすじ・画像・キャストの追加取得や、Annictにない情報の補完は行いません。
+
+### Jellyfin用の作品画像
+
+```sh
+# 整理済みライブラリ: 画像だけを後付けする対象と取得元を確認
+anime-renamer --artwork-only --dry-run --recursive /mnt/prod/dtv
+
+# 実行（動画・NFOの書き換えやFFmpegの実行はしない）
+anime-renamer --artwork-only --recursive /mnt/prod/dtv
+
+# 新しい録画: リネーム・メタデータ付与に作品画像の追加を組み合わせる
+anime-renamer --metadata auto --artwork --recursive /mnt/prod/recorded
+```
+
+作品フォルダごとに、Annictの作品名・放送年・放送期から生成する1000×1500の文字主体の `poster.png` と、公式サイトの画像を加工せず保存する `thumb.jpg` / `thumb.png` / `thumb.webp` を追加します。ポスターは同梱のBIZ UDPGothicフォントで描画するため、OSへのフォント導入や画像生成APIは不要です。フォントで描けない文字や収まらないタイトルは、文字を削らず生成失敗として報告します。
+
+`--artwork-only` は `tvshow.nfo` の `<uniqueid type="annict">作品ID</uniqueid>`、または過去の画像処理が作成した `.anime-renamer-artwork.json` を使います。Annictに同じ作品IDが存在することを確認してから生成し、IDなし・削除済みの作品はスキップします。フォルダ名での検索や別DBへの推測による紐付けは行いません。エピソードNFOのAnnict IDはエピソードIDなので、作品IDとして使いません。`--metadata-only`・メタデータ出力指定・`--output` との併用はできません。
+
+`--artwork` は通常の厳密な照合で信頼度90以上になった作品だけを対象にし、全ファイルの処理後に作品単位で画像を追加します。同じフォルダに複数のAnnict作品IDが集まった場合はスキップします。`duplicate/` は親の作品として扱い、複数作品が混在する未整理のフォルダには画像を置きません。
+
+作品フォルダ内の既存の `poster`・`folder`・`cover`・`show`、`thumb`・`landscape` などの画像は別名・別拡張子も含めて保持します。再実行で画像を上書き・再取得せず、不足分だけを追加します。`.anime-renamer-artwork.json` は作品ID・作品名・取得元を記録する小さなファイルで、別の作品の画像が混ざることを防ぎます。作品フォルダ単位のロックを使い、作業用ファイルとロックは正常終了時に削除します。
+
+公式画像はAnnictの作品別OGP URLを優先し、失敗したら推奨画像URLを試します。URL未登録の場合はポスターのみを生成し、サムネイルをスキップします。取得失敗でも作成できたポスターは保持し、失敗を報告します。画像は10 MiB・1600万画素まで、JPEG/PNG/WebPに限定して検証後に保存します。画像ホストへAnnictの認証情報は送らず、ローカル・プライベートアドレスへの接続は拒否します。dry-runでもAPI・画像の読み取り検証は行いますが、画像・記録ファイル・ロックは作成しません。
+
+Annictの画像URLはリンク切れや続編間での共有があるため、取得元をプレビューで確認してください。文字主体のポスターには外部画像を合成しません。画像の取扱いは [Annict API利用規約](https://annict.com/terms/api) を参照してください。Jellyfinへの反映は対象作品のメタデータ更新で行い、CLIからスキャンや画像のアップロードは実行しません。
 
 ### リネーム後のファイル名
 

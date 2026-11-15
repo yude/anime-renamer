@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/yude/anime-renamer/internal/annict"
+	"github.com/yude/anime-renamer/internal/artwork"
 	"github.com/yude/anime-renamer/internal/cache"
 	"github.com/yude/anime-renamer/internal/dateinfer"
 	"github.com/yude/anime-renamer/internal/epgstation"
@@ -43,6 +44,10 @@ func main() {
 	keepBackup := flag.Bool("keep-backup", false, "Retain successful embedded-metadata recovery backups (default: remove after verified commit)")
 	metadataTimeout := flag.Duration("metadata-timeout", metadata.DefaultTimeout, "Maximum time for metadata commands per recording")
 	metadataSeason := flag.Int("metadata-season", 1, "Local season number for each independent Annict work; no season is inferred from its title")
+	withArtwork := flag.Bool("artwork", false, "Add a title poster and unmodified official thumbnail to each verified work folder")
+	artworkOnly := flag.Bool("artwork-only", false, "Add work artwork using existing Annict IDs without renaming or remuxing recordings")
+	artworkTimeout := flag.Duration("artwork-timeout", artwork.DefaultTimeout, "Maximum artwork processing time per work folder")
+	fontLicense := flag.Bool("artwork-font-license", false, "Display the bundled Japanese font's copyright and license")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "anime-renamer - Annict-based recording file renamer\n\n")
@@ -59,6 +64,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  EPGSTATION_URL         Optional EPGStation URL for recording-history recovery\n")
 	}
 	flag.Parse()
+	if *fontLicense {
+		fmt.Print(artwork.FontLicense)
+		return
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -69,6 +78,12 @@ func main() {
 	}
 	if err := validateConfidenceThreshold(*confidenceThreshold); err != nil {
 		log.Fatal(err)
+	}
+	if *artworkTimeout <= 0 {
+		log.Fatal("--artwork-timeout must be positive")
+	}
+	if *artworkOnly && (*metadataOnly || *metadataMode != "none" || *outputDir != "") {
+		log.Fatal("--artwork-only cannot be combined with --metadata-only, --metadata output, or --output")
 	}
 	metadataExplicit := false
 	flag.Visit(func(f *flag.Flag) {
@@ -98,6 +113,20 @@ func main() {
 
 	// Initialize components
 	annictClient := annict.NewClient(token).WithContext(ctx)
+	if *artworkOnly {
+		jobs, err := collectArtworkJobs(flag.Arg(0), *recursive)
+		if err != nil {
+			log.Fatal(err)
+		}
+		failures := runArtworkJobs(ctx, jobs, annictClient, *dryRun, *artworkTimeout)
+		if ctx.Err() != nil {
+			os.Exit(130)
+		}
+		if code := exitCodeForFailures(failures); code != 0 {
+			os.Exit(code)
+		}
+		return
+	}
 	syobocalClient := syobocal.NewClient().WithContext(ctx)
 	if *epgstationURL == "" {
 		*epgstationURL = os.Getenv("EPGSTATION_URL")
@@ -146,6 +175,9 @@ func main() {
 	programsCache := make(map[programsCacheKey][]annict.Program)
 	plannedDestinations := make(map[string]string)
 	processing := &processingContext{syobocalClient: syobocalClient, batchSchedule: batchSchedule, epgstationClient: epgClient}
+	if *withArtwork {
+		processing.artwork = make(artworkJobs)
+	}
 	if *metadataMode != "none" {
 		processing.metadata = metadataConfig
 	}
@@ -194,6 +226,9 @@ func main() {
 		}
 	}
 
+	if *withArtwork && ctx.Err() == nil {
+		failed += runArtworkJobs(ctx, processing.artwork, annictClient, *dryRun, *artworkTimeout)
+	}
 	// Summary
 	fmt.Fprintf(os.Stderr, "\n--- Summary ---\n")
 	if *dryRun {
@@ -234,6 +269,7 @@ type processingContext struct {
 	syobocalChannels []syobocal.Channel
 	tsMetadataReader func(string) (*tsmeta.Broadcast, error)
 	metadata         *metadataOptions
+	artwork          artworkJobs
 }
 
 type channelAnchorState struct {
@@ -719,9 +755,19 @@ func processFile(
 }
 
 func renameMatchedRecording(file string, result *matcher.MatchResult, dryRun bool, outputDir string, plannedDestinations map[string]string, contexts ...*processingContext) *renamer.RenameResult {
+	var renamed *renamer.RenameResult
 	if len(contexts) > 0 && contexts[0] != nil && contexts[0].metadata != nil {
-		return processMatchedMetadata(file, result, dryRun, outputDir, plannedDestinations, contexts[0].metadata)
+		renamed = processMatchedMetadata(file, result, dryRun, outputDir, plannedDestinations, contexts[0].metadata)
+	} else {
+		renamed = renameWithoutMetadata(file, result, dryRun, outputDir, plannedDestinations)
 	}
+	if renamed.Error == nil && renamed.SkipReason == "" && len(contexts) > 0 && contexts[0] != nil && contexts[0].artwork != nil {
+		contexts[0].artwork.matched(renamed.NewPath, result)
+	}
+	return renamed
+}
+
+func renameWithoutMetadata(file string, result *matcher.MatchResult, dryRun bool, outputDir string, plannedDestinations map[string]string) *renamer.RenameResult {
 	result2 := renamer.RenameWithReservations(file, result, dryRun, outputDir, plannedDestinations)
 	if result2.Error != nil {
 		return result2
